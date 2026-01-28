@@ -138,12 +138,44 @@ const JobCreation: React.FC<JobCreationProps> = ({
     });
   };
 
+  // Range selection state
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+
   const selectAll = () => {
     setSelectedProductIds(new Set(filteredProducts.map((p) => p.id)));
   };
 
   const deselectAll = () => {
     setSelectedProductIds(new Set());
+  };
+
+  const selectRange = () => {
+    const start = parseInt(rangeStart) || 1;
+    const end = parseInt(rangeEnd) || filteredProducts.length;
+
+    // Validate range
+    const validStart = Math.max(1, Math.min(start, filteredProducts.length));
+    const validEnd = Math.max(validStart, Math.min(end, filteredProducts.length));
+
+    // Select products in range (1-indexed for user, 0-indexed in array)
+    const rangeProducts = filteredProducts.slice(validStart - 1, validEnd);
+    setSelectedProductIds(new Set(rangeProducts.map((p) => p.id)));
+  };
+
+  const addRange = () => {
+    const start = parseInt(rangeStart) || 1;
+    const end = parseInt(rangeEnd) || filteredProducts.length;
+
+    const validStart = Math.max(1, Math.min(start, filteredProducts.length));
+    const validEnd = Math.max(validStart, Math.min(end, filteredProducts.length));
+
+    const rangeProducts = filteredProducts.slice(validStart - 1, validEnd);
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      rangeProducts.forEach((p) => next.add(p.id));
+      return next;
+    });
   };
 
   const getBackgroundOption = (): BackgroundOption => {
@@ -228,6 +260,43 @@ const JobCreation: React.FC<JobCreationProps> = ({
                     Deselect all
                   </button>
                 </div>
+              </div>
+
+              {/* Range Selector */}
+              <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-gray-700 rounded-lg">
+                <span className="text-sm text-gray-300">Select range:</span>
+                <input
+                  type="number"
+                  placeholder="From"
+                  value={rangeStart}
+                  onChange={(e) => setRangeStart(e.target.value)}
+                  min={1}
+                  max={filteredProducts.length}
+                  className="w-20 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-gray-400">-</span>
+                <input
+                  type="number"
+                  placeholder="To"
+                  value={rangeEnd}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                  min={1}
+                  max={filteredProducts.length}
+                  className="w-20 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-xs text-gray-400">(of {filteredProducts.length})</span>
+                <button
+                  onClick={selectRange}
+                  className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                >
+                  Select Range
+                </button>
+                <button
+                  onClick={addRange}
+                  className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                >
+                  Add to Selection
+                </button>
               </div>
 
               {/* Filters */}

@@ -188,7 +188,7 @@ export const STORAGE_KEYS = {
 export const MAX_IMAGES_PER_PRODUCT = 12;
 export const MIN_IMAGES_PER_PRODUCT = 1;
 export const DEFAULT_PARALLEL_PRODUCTS = 1;
-export const MAX_PARALLEL_PRODUCTS = 5;
+export const MAX_PARALLEL_PRODUCTS = 20;
 
 // ============================================
 // Background Options
