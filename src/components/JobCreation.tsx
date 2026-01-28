@@ -50,7 +50,11 @@ const ProductCard: React.FC<{
       </div>
       <div className="p-2 bg-gray-800">
         <p className="text-sm text-white truncate">{product.title}</p>
-        <p className="text-xs text-gray-400">{product.images.length} images</p>
+        <p className="text-xs text-gray-400 truncate">
+          {product.vendor && <span className="text-blue-400">{product.vendor}</span>}
+          {product.vendor && ' · '}
+          {product.images.length} images
+        </p>
       </div>
       {isSelected && (
         <div className="absolute top-2 right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
@@ -78,6 +82,8 @@ const JobCreation: React.FC<JobCreationProps> = ({
   const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_GENERATION_SETTINGS);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
+  const [filterVendor, setFilterVendor] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'title' | 'vendor' | 'type'>('title');
   const [backgroundType, setBackgroundType] = useState<'default' | 'transparent' | 'solid' | 'gradient' | 'custom'>('default');
   const [customBackground, setCustomBackground] = useState('');
   const [solidColor, setSolidColor] = useState('#FFFFFF');
@@ -89,16 +95,36 @@ const JobCreation: React.FC<JobCreationProps> = ({
     return Array.from(types).sort();
   }, [products]);
 
-  // Filter products
+  // Get unique vendors
+  const vendors = useMemo(() => {
+    const vendorSet = new Set(products.map((p) => p.vendor).filter(Boolean));
+    return Array.from(vendorSet).sort();
+  }, [products]);
+
+  // Filter and sort products
   const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
+    const filtered = products.filter((product) => {
       const matchesSearch =
         product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         product.vendor?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || product.product_type === filterType;
-      return matchesSearch && matchesType;
+      const matchesVendor = filterVendor === 'all' || product.vendor === filterVendor;
+      return matchesSearch && matchesType && matchesVendor;
     });
-  }, [products, searchQuery, filterType]);
+
+    // Sort products
+    return filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'vendor':
+          return (a.vendor || '').localeCompare(b.vendor || '');
+        case 'type':
+          return (a.product_type || '').localeCompare(b.product_type || '');
+        case 'title':
+        default:
+          return a.title.localeCompare(b.title);
+      }
+    });
+  }, [products, searchQuery, filterType, filterVendor, sortBy]);
 
   const toggleProduct = (productId: number) => {
     setSelectedProductIds((prev) => {
@@ -205,29 +231,75 @@ const JobCreation: React.FC<JobCreationProps> = ({
               </div>
 
               {/* Filters */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-4">
-                <div className="flex-1">
-                  <input
-                    type="text"
-                    placeholder="Search products..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+              <div className="flex flex-col gap-4 mb-4">
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      placeholder="Search products..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <select
+                      value={filterVendor}
+                      onChange={(e) => setFilterVendor(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All vendors</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor} value={vendor}>
+                          {vendor}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <select
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All types</option>
+                      {productTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400">Sort by:</span>
+                  <button
+                    onClick={() => setSortBy('title')}
+                    className={`px-3 py-1 text-sm rounded ${
+                      sortBy === 'title' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
+                    }`}
                   >
-                    <option value="all">All types</option>
-                    {productTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
+                    Title
+                  </button>
+                  <button
+                    onClick={() => setSortBy('vendor')}
+                    className={`px-3 py-1 text-sm rounded ${
+                      sortBy === 'vendor' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
+                    }`}
+                  >
+                    Vendor
+                  </button>
+                  <button
+                    onClick={() => setSortBy('type')}
+                    className={`px-3 py-1 text-sm rounded ${
+                      sortBy === 'type' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
+                    }`}
+                  >
+                    Type
+                  </button>
+                  <span className="ml-auto text-sm text-gray-400">
+                    {filteredProducts.length} products
+                  </span>
                 </div>
               </div>
 
