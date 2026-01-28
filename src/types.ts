@@ -1,0 +1,330 @@
+// ============================================
+// Shopify Domain Types
+// ============================================
+
+export interface ShopifyCredentials {
+  storeUrl: string;
+  accessToken: string;
+  proxyUrl: string;
+}
+
+export interface ShopifyImage {
+  id: number;
+  src: string;
+  position?: number;
+  alt?: string | null;
+  width?: number;
+  height?: number;
+}
+
+export interface ShopifyProduct {
+  id: number;
+  title: string;
+  images: ShopifyImage[];
+  product_type: string;
+  body_html: string;
+  vendor: string;
+  status: 'active' | 'archived' | 'draft';
+  handle?: string;
+  tags?: string;
+}
+
+export interface ShopifyCollection {
+  id: number;
+  title: string;
+  handle: string;
+  body_html: string;
+  image: ShopifyImage | null;
+  products_count?: number;
+  collection_type: 'smart' | 'custom';
+}
+
+// ============================================
+// AI Analysis Types
+// ============================================
+
+export interface ProductAnalysis {
+  description: string;
+  estimatedSize: string;
+  useCases: string[];
+  sources?: { uri: string; title: string }[];
+}
+
+export interface CollectionAnalysis {
+  collectionTheme: string;
+  targetAudience: string;
+  visualStyle: string;
+  keyProducts: string[];
+  marketingAngle: string;
+  suggestedImageConcept: string;
+}
+
+// ============================================
+// Quality Assurance Types
+// ============================================
+
+export interface QAInfo {
+  isApproved: boolean;
+  reasoning: string;
+}
+
+export interface CollectionQAResult {
+  isApproved: boolean;
+  categoryMatch: number;
+  realismScore: number;
+  issues: string[];
+  suggestions: string[];
+  reasoning: string;
+}
+
+// ============================================
+// Generation Settings Types
+// ============================================
+
+export type BackgroundOption =
+  | { type: 'default' }
+  | { type: 'transparent' }
+  | { type: 'solid'; color: string }
+  | { type: 'gradient'; colors: string[] }
+  | { type: 'custom'; description: string };
+
+export interface ProductRangeSelection {
+  start: number;
+  end: number;
+}
+
+export interface GenerationSettings {
+  numToGenerate: number;
+  uploadMode: 'replace' | 'append';
+  backgroundOption: BackgroundOption;
+  preserveOriginalImage: boolean;
+  productRange?: ProductRangeSelection;
+  parallelProducts: number;
+  brandGuidelines?: string;
+}
+
+// ============================================
+// Generated Image Types
+// ============================================
+
+export interface GeneratedImage {
+  id: string;
+  base64: string;
+  imageUrl?: string;
+  prompt: string;
+  originalPrompt?: string;
+  status: 'generating' | 'success' | 'error' | 'uploading' | 'uploaded' | 'qa_failed';
+  error?: string;
+  isApproved: boolean;
+  qaInfo: QAInfo | null;
+  regenerationCount: number;
+}
+
+export interface CollectionGeneratedImage {
+  id: string;
+  base64: string;
+  imageUrl?: string;
+  prompt: string;
+  status: 'generating' | 'success' | 'error' | 'uploading' | 'uploaded' | 'qa_failed';
+  error?: string;
+  qaResult: CollectionQAResult | null;
+  regenerationCount: number;
+}
+
+// ============================================
+// Product Generation State Types
+// ============================================
+
+export interface ProductGenerationState {
+  sourceImageBase64s: string[] | null;
+  analysis: ProductAnalysis | null;
+  generatedImages: GeneratedImage[];
+  isGenerating: boolean;
+  isAnalyzed: boolean;
+  error: string | null;
+}
+
+// ============================================
+// Job Types
+// ============================================
+
+export type JobStatus =
+  | 'queued'
+  | 'analyzing_products'
+  | 'generating_images'
+  | 'completed'
+  | 'failed'
+  | 'stopping'
+  | 'stopped';
+
+export interface GenerationJob {
+  id: string;
+  name: string;
+  status: JobStatus;
+  productIds: number[];
+  settings: GenerationSettings;
+  creationDate: string;
+  productStates: Record<number, ProductGenerationState>;
+  error?: string;
+  storeUrl?: string;
+}
+
+// ============================================
+// Collection Generation Types
+// ============================================
+
+export type CollectionGenerationStatus =
+  | 'pending'
+  | 'analyzing'
+  | 'generating'
+  | 'uploading'
+  | 'completed'
+  | 'error';
+
+export interface CollectionGenerationState {
+  collection: ShopifyCollection;
+  sampleProducts: ShopifyProduct[];
+  analysis: CollectionAnalysis | null;
+  generatedImage: CollectionGeneratedImage | null;
+  status: CollectionGenerationStatus;
+  error: string | null;
+}
+
+// ============================================
+// Collection Plan Types (for pipeline)
+// ============================================
+
+export interface CollectionPlan {
+  analysis: CollectionAnalysis;
+  imageRequirements: {
+    mustInclude: string[];
+    mustAvoid: string[];
+    colorPalette: string[];
+    composition: string;
+    lighting: string;
+    realisticElements: string[];
+  };
+  qualityCriteria: {
+    categoryFit: string;
+    realismChecks: string[];
+    brandAlignment: string;
+  };
+}
+
+// ============================================
+// App View State Types
+// ============================================
+
+export type AppView =
+  | { state: 'CONNECTING' }
+  | { state: 'LOADING'; message: string }
+  | { state: 'DASHBOARD' }
+  | { state: 'CREATING_JOB' }
+  | { state: 'VIEWING_JOB'; jobId: string }
+  | { state: 'COLLECTION_MANAGER' };
+
+// ============================================
+// Rate Limiter Types
+// ============================================
+
+export type RateLimiterTier = 'free' | 'paid';
+
+export interface RateLimiterConfig {
+  maxConcurrent: number;
+  minDelayBetweenRequests: number;
+  maxRequestsPerMinute: number;
+  rateLimitCooldown: number;
+}
+
+// ============================================
+// Shot Brief Types
+// ============================================
+
+export interface ShotBrief {
+  index: number;
+  type: 'studio' | 'in-use' | 'premium' | 'lifestyle';
+  description: string;
+  allowsCannabis: boolean;
+  allowsSmoke: boolean;
+}
+
+// ============================================
+// API Response Types
+// ============================================
+
+export interface ShopifyApiResponse<T> {
+  data: T;
+  headers: Headers;
+}
+
+export interface GeminiGenerationResult {
+  base64: string;
+  prompt: string;
+  originalPrompt?: string;
+  qaInfo: QAInfo | null;
+}
+
+// ============================================
+// Supabase Types
+// ============================================
+
+export interface SupabaseJobRecord {
+  id: string;
+  name: string;
+  status: JobStatus;
+  product_ids: number[];
+  settings: GenerationSettings;
+  creation_date: string;
+  product_states: Record<number, ProductGenerationState>;
+  error?: string;
+  store_url?: string;
+}
+
+// ============================================
+// UI Component Props Types
+// ============================================
+
+export interface ProductCardProps {
+  product: ShopifyProduct;
+  isSelected: boolean;
+  onSelect: (productId: number) => void;
+}
+
+export interface ResultCardProps {
+  image: GeneratedImage;
+  product: ShopifyProduct;
+  onApprove: (imageId: string) => void;
+  onRegenerate: (imageId: string, feedback?: string) => void;
+  onView: (image: GeneratedImage) => void;
+}
+
+export interface JobCardProps {
+  job: GenerationJob;
+  products: ShopifyProduct[];
+  onView: (jobId: string) => void;
+  onDelete: (jobId: string) => void;
+  onResume: (jobId: string) => void;
+}
+
+// ============================================
+// Modal Types
+// ============================================
+
+export interface ImageViewerModalProps {
+  image: GeneratedImage | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export interface RegenerationFeedbackModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (feedback: string) => void;
+}
+
+// ============================================
+// Event Handler Types
+// ============================================
+
+export type JobUpdater = (job: GenerationJob) => GenerationJob;
+export type SetStatusCallback = (status: string) => void;

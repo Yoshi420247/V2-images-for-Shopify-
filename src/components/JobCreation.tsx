@@ -1,0 +1,470 @@
+import React, { useState, useMemo } from 'react';
+import { ShopifyProduct, GenerationSettings, BackgroundOption } from '../types';
+import {
+  DEFAULT_GENERATION_SETTINGS,
+  MAX_IMAGES_PER_PRODUCT,
+  MIN_IMAGES_PER_PRODUCT,
+  MAX_PARALLEL_PRODUCTS,
+  PRESET_BACKGROUND_COLORS,
+  PRESET_GRADIENTS,
+} from '../constants';
+
+interface JobCreationProps {
+  products: ShopifyProduct[];
+  onCreateJob: (
+    name: string,
+    productIds: number[],
+    settings: GenerationSettings
+  ) => void;
+  onCancel: () => void;
+}
+
+const ProductCard: React.FC<{
+  product: ShopifyProduct;
+  isSelected: boolean;
+  onToggle: () => void;
+}> = ({ product, isSelected, onToggle }) => {
+  const imageUrl = product.images[0]?.src || '';
+
+  return (
+    <div
+      onClick={onToggle}
+      className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+        isSelected
+          ? 'border-blue-500 ring-2 ring-blue-500/50'
+          : 'border-gray-700 hover:border-gray-600'
+      }`}
+    >
+      <div className="aspect-square bg-gray-800">
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={product.title}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-500">
+            No image
+          </div>
+        )}
+      </div>
+      <div className="p-2 bg-gray-800">
+        <p className="text-sm text-white truncate">{product.title}</p>
+        <p className="text-xs text-gray-400">{product.images.length} images</p>
+      </div>
+      {isSelected && (
+        <div className="absolute top-2 right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+          <svg
+            className="w-4 h-4 text-white"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const JobCreation: React.FC<JobCreationProps> = ({
+  products,
+  onCreateJob,
+  onCancel,
+}) => {
+  const [jobName, setJobName] = useState('');
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(new Set());
+  const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_GENERATION_SETTINGS);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [backgroundType, setBackgroundType] = useState<'default' | 'transparent' | 'solid' | 'gradient' | 'custom'>('default');
+  const [customBackground, setCustomBackground] = useState('');
+  const [solidColor, setSolidColor] = useState('#FFFFFF');
+  const [gradientColors, setGradientColors] = useState(['#FFFFFF', '#F0F0F0']);
+
+  // Get unique product types
+  const productTypes = useMemo(() => {
+    const types = new Set(products.map((p) => p.product_type).filter(Boolean));
+    return Array.from(types).sort();
+  }, [products]);
+
+  // Filter products
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      const matchesSearch =
+        product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.vendor?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesType = filterType === 'all' || product.product_type === filterType;
+      return matchesSearch && matchesType;
+    });
+  }, [products, searchQuery, filterType]);
+
+  const toggleProduct = (productId: number) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedProductIds(new Set(filteredProducts.map((p) => p.id)));
+  };
+
+  const deselectAll = () => {
+    setSelectedProductIds(new Set());
+  };
+
+  const getBackgroundOption = (): BackgroundOption => {
+    switch (backgroundType) {
+      case 'transparent':
+        return { type: 'transparent' };
+      case 'solid':
+        return { type: 'solid', color: solidColor };
+      case 'gradient':
+        return { type: 'gradient', colors: gradientColors };
+      case 'custom':
+        return { type: 'custom', description: customBackground };
+      default:
+        return { type: 'default' };
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const name = jobName.trim() || `Job ${new Date().toLocaleDateString()}`;
+    const finalSettings: GenerationSettings = {
+      ...settings,
+      backgroundOption: getBackgroundOption(),
+    };
+
+    onCreateJob(name, Array.from(selectedProductIds), finalSettings);
+  };
+
+  const isValid = selectedProductIds.size > 0;
+
+  return (
+    <div className="min-h-screen bg-gray-900">
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-white">Create New Job</h1>
+              <p className="text-sm text-gray-400">
+                Select products and configure generation settings
+              </p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={onCancel}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!isValid}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                Create Job ({selectedProductIds.size} products)
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Product Selection */}
+          <div className="lg:col-span-2">
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Select Products</h2>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={selectAll}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    Select all
+                  </button>
+                  <span className="text-gray-500">|</span>
+                  <button
+                    onClick={deselectAll}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    Deselect all
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <select
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">All types</option>
+                    {productTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Product Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-h-[600px] overflow-y-auto">
+                {filteredProducts.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    isSelected={selectedProductIds.has(product.id)}
+                    onToggle={() => toggleProduct(product.id)}
+                  />
+                ))}
+              </div>
+
+              {filteredProducts.length === 0 && (
+                <p className="text-center text-gray-400 py-8">No products found</p>
+              )}
+            </div>
+          </div>
+
+          {/* Settings Panel */}
+          <div className="lg:col-span-1">
+            <div className="bg-gray-800 rounded-lg p-4 sticky top-24">
+              <h2 className="text-lg font-semibold text-white mb-4">Settings</h2>
+
+              <div className="space-y-4">
+                {/* Job Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Job Name
+                  </label>
+                  <input
+                    type="text"
+                    value={jobName}
+                    onChange={(e) => setJobName(e.target.value)}
+                    placeholder="My generation job"
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Images per Product */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Images per Product: {settings.numToGenerate}
+                  </label>
+                  <input
+                    type="range"
+                    min={MIN_IMAGES_PER_PRODUCT}
+                    max={MAX_IMAGES_PER_PRODUCT}
+                    value={settings.numToGenerate}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        numToGenerate: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>{MIN_IMAGES_PER_PRODUCT}</span>
+                    <span>{MAX_IMAGES_PER_PRODUCT}</span>
+                  </div>
+                </div>
+
+                {/* Parallel Products */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Parallel Products: {settings.parallelProducts}
+                  </label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={MAX_PARALLEL_PRODUCTS}
+                    value={settings.parallelProducts}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        parallelProducts: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Higher values process faster but may hit rate limits
+                  </p>
+                </div>
+
+                {/* Upload Mode */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Upload Mode
+                  </label>
+                  <select
+                    value={settings.uploadMode}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        uploadMode: e.target.value as 'replace' | 'append',
+                      }))
+                    }
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="append">Add to existing images</option>
+                    <option value="replace">Replace all images</option>
+                  </select>
+                </div>
+
+                {/* Background Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Background Style
+                  </label>
+                  <select
+                    value={backgroundType}
+                    onChange={(e) =>
+                      setBackgroundType(
+                        e.target.value as typeof backgroundType
+                      )
+                    }
+                    className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="default">Auto (best for shot type)</option>
+                    <option value="transparent">Transparent-ready</option>
+                    <option value="solid">Solid color</option>
+                    <option value="gradient">Gradient</option>
+                    <option value="custom">Custom description</option>
+                  </select>
+
+                  {/* Background Type Specific Options */}
+                  {backgroundType === 'solid' && (
+                    <div className="mt-2">
+                      <label className="block text-xs text-gray-400 mb-1">
+                        Select color
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {PRESET_BACKGROUND_COLORS.map((color) => (
+                          <button
+                            key={color.value}
+                            onClick={() => setSolidColor(color.value)}
+                            className={`w-8 h-8 rounded border-2 ${
+                              solidColor === color.value
+                                ? 'border-blue-500'
+                                : 'border-gray-600'
+                            }`}
+                            style={{ backgroundColor: color.value }}
+                            title={color.name}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {backgroundType === 'gradient' && (
+                    <div className="mt-2">
+                      <label className="block text-xs text-gray-400 mb-1">
+                        Select gradient
+                      </label>
+                      <div className="flex flex-col gap-2">
+                        {PRESET_GRADIENTS.map((gradient) => (
+                          <button
+                            key={gradient.name}
+                            onClick={() => setGradientColors(gradient.colors)}
+                            className={`px-3 py-2 rounded text-sm text-left ${
+                              gradientColors.join() === gradient.colors.join()
+                                ? 'ring-2 ring-blue-500'
+                                : ''
+                            }`}
+                            style={{
+                              background: `linear-gradient(90deg, ${gradient.colors.join(', ')})`,
+                              color:
+                                gradient.colors[0] === '#1A1A2E' ? 'white' : 'black',
+                            }}
+                          >
+                            {gradient.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {backgroundType === 'custom' && (
+                    <div className="mt-2">
+                      <label className="block text-xs text-gray-400 mb-1">
+                        Describe the background
+                      </label>
+                      <textarea
+                        value={customBackground}
+                        onChange={(e) => setCustomBackground(e.target.value)}
+                        placeholder="e.g., Natural marble surface with soft shadows..."
+                        rows={3}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Preserve Original */}
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="preserveOriginal"
+                    checked={settings.preserveOriginalImage}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        preserveOriginalImage: e.target.checked,
+                      }))
+                    }
+                    className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                  />
+                  <label
+                    htmlFor="preserveOriginal"
+                    className="ml-2 text-sm text-gray-300"
+                  >
+                    Keep original product images
+                  </label>
+                </div>
+
+                {/* Summary */}
+                <div className="pt-4 border-t border-gray-700">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">Summary</h3>
+                  <ul className="text-sm text-gray-400 space-y-1">
+                    <li>Products: {selectedProductIds.size}</li>
+                    <li>Images per product: {settings.numToGenerate}</li>
+                    <li>
+                      Total images: {selectedProductIds.size * settings.numToGenerate}
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default JobCreation;
