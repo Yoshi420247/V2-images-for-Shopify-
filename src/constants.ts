@@ -136,14 +136,14 @@ export const SHOT_BRIEFS: ShotBrief[] = [
 export const RATE_LIMITER_CONFIG: Record<'free' | 'paid', RateLimiterConfig> = {
   free: {
     maxConcurrent: 1,
-    minDelayBetweenRequests: 8000,
-    maxRequestsPerMinute: 5,
+    minDelayBetweenRequests: 12000,
+    maxRequestsPerMinute: 2,
     rateLimitCooldown: 60000,
   },
   paid: {
-    maxConcurrent: 10,
-    minDelayBetweenRequests: 500,
-    maxRequestsPerMinute: 60,
+    maxConcurrent: 3,
+    minDelayBetweenRequests: 4000,
+    maxRequestsPerMinute: 15,
     rateLimitCooldown: 10000,
   },
 };
