@@ -93,6 +93,8 @@ export interface ProductRangeSelection {
   end: number;
 }
 
+export type ImageGenerationModel = 'gemini-3-pro' | 'nano-banana';
+
 export interface GenerationSettings {
   numToGenerate: number;
   uploadMode: 'replace' | 'append';
@@ -101,6 +103,7 @@ export interface GenerationSettings {
   productRange?: ProductRangeSelection;
   parallelProducts: number;
   brandGuidelines?: string;
+  imageModel?: ImageGenerationModel;
 }
 
 // ============================================
@@ -116,6 +119,7 @@ export interface GeneratedImage {
   status: 'generating' | 'success' | 'error' | 'uploading' | 'uploaded' | 'qa_failed';
   error?: string;
   isApproved: boolean;
+  selectedForUpload: boolean;
   qaInfo: QAInfo | null;
   regenerationCount: number;
 }

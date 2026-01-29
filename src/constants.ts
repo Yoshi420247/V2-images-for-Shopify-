@@ -11,7 +11,23 @@ export const SHOPIFY_API_VERSION = '2024-07';
 export const MODELS = {
   TEXT_MODEL: 'gpt-5.1',
   IMAGE_GENERATION: 'gemini-3-pro-image-preview',
+  IMAGE_GENERATION_FAST: 'gemini-2.5-flash-preview-image-generation', // "Nano Banana" - faster, lower cost
 } as const;
+
+export type ImageGenerationModel = 'gemini-3-pro' | 'nano-banana';
+
+export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; description: string }[] = [
+  {
+    id: 'gemini-3-pro',
+    name: 'Gemini 3 Pro',
+    description: 'Highest quality, best for final production images',
+  },
+  {
+    id: 'nano-banana',
+    name: 'Nano Banana',
+    description: 'Gemini 2.5 Flash - Faster generation, lower cost',
+  },
+];
 
 // ============================================
 // AI System Prompt
@@ -136,14 +152,14 @@ export const SHOT_BRIEFS: ShotBrief[] = [
 export const RATE_LIMITER_CONFIG: Record<'free' | 'paid', RateLimiterConfig> = {
   free: {
     maxConcurrent: 1,
-    minDelayBetweenRequests: 8000,
-    maxRequestsPerMinute: 5,
+    minDelayBetweenRequests: 12000,
+    maxRequestsPerMinute: 2,
     rateLimitCooldown: 60000,
   },
   paid: {
-    maxConcurrent: 10,
-    minDelayBetweenRequests: 500,
-    maxRequestsPerMinute: 60,
+    maxConcurrent: 3,
+    minDelayBetweenRequests: 4000,
+    maxRequestsPerMinute: 15,
     rateLimitCooldown: 10000,
   },
 };
