@@ -9,23 +9,23 @@ export const CORS_PROXY_URL = 'https://cors-proxy.joshwrites247.workers.dev/';
 export const SHOPIFY_API_VERSION = '2024-07';
 
 export const MODELS = {
-  TEXT_MODEL: 'gpt-5.1',
-  IMAGE_GENERATION: 'gemini-3-pro-image-preview',
-  IMAGE_GENERATION_FAST: 'gemini-2.5-flash-preview-image-generation', // "Nano Banana" - faster, lower cost
+  TEXT_MODEL: 'gpt-4o',
+  IMAGE_GENERATION: 'gemini-2.0-flash-exp', // Main image generation model
+  IMAGE_GENERATION_FAST: 'gemini-2.0-flash-exp', // "Nano Banana" - same model for now until faster variant available
 } as const;
 
-export type ImageGenerationModel = 'gemini-3-pro' | 'nano-banana';
+export type ImageGenerationModel = 'gemini-2.0-flash' | 'nano-banana';
 
 export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; description: string }[] = [
   {
-    id: 'gemini-3-pro',
-    name: 'Gemini 3 Pro',
-    description: 'Highest quality, best for final production images',
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    description: 'High quality image generation with multimodal support',
   },
   {
     id: 'nano-banana',
     name: 'Nano Banana',
-    description: 'Gemini 2.5 Flash - Faster generation, lower cost',
+    description: 'Same model (faster variant coming soon)',
   },
 ];
 
