@@ -7,6 +7,7 @@ import {
   GeneratedImage,
   ProductGenerationState,
   ImageGenerationModel,
+  ImageResolution,
 } from '../types';
 import {
   analyzeProduct,
@@ -20,7 +21,7 @@ import {
   deleteAllProductImages,
 } from '../services/shopifyService';
 import { persistGeneratedImage, saveJob } from '../services/supabaseService';
-import { QA_THRESHOLDS, STATUS_MESSAGES, IMAGE_MODEL_OPTIONS } from '../constants';
+import { QA_THRESHOLDS, STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
   job: GenerationJob;
@@ -63,6 +64,9 @@ const JobDetails: React.FC<JobDetailsProps> = ({
   const [smartAnalyzing, setSmartAnalyzing] = useState<Set<string>>(new Set());
   const [imageModel, setImageModel] = useState<ImageGenerationModel>(
     job.settings.imageModel || 'nano-banana'
+  );
+  const [imageResolution, setImageResolution] = useState<ImageResolution>(
+    job.settings.imageResolution || '2k'
   );
 
   // Processing refs
@@ -232,7 +236,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         true,
         feedback,
         image.prompt,
-        imageModel
+        imageModel,
+        imageResolution
       );
 
       const regeneratedImage: GeneratedImage = {
@@ -307,7 +312,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         true,
         feedback || image.qaInfo?.reasoning,
         image.prompt,
-        imageModel
+        imageModel,
+        imageResolution
       );
 
       const regeneratedImage: GeneratedImage = {
@@ -419,7 +425,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             undefined,
             undefined,
             undefined,
-            imageModel
+            imageModel,
+            imageResolution
           );
 
           const generatedImage: GeneratedImage = {
@@ -451,7 +458,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               true,
               result.qaInfo?.reasoning,
               result.prompt,
-              imageModel
+              imageModel,
+              imageResolution
             );
 
             finalImage = {
@@ -513,12 +521,12 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     isRunningRef.current = true;
     shouldStopRef.current = false;
 
-    // Update image model in settings
+    // Update image model and resolution in settings
     onUpdateJob((j) => ({
       ...j,
       status: 'analyzing_products',
       error: undefined,
-      settings: { ...j.settings, imageModel },
+      settings: { ...j.settings, imageModel, imageResolution },
     }));
 
     const jobProducts = getProductsForJob();
@@ -856,6 +864,20 @@ const JobDetails: React.FC<JobDetailsProps> = ({
                 {IMAGE_MODEL_OPTIONS.map((opt) => (
                   <option key={opt.id} value={opt.id}>
                     {opt.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Resolution selector */}
+              <select
+                value={imageResolution}
+                onChange={(e) => setImageResolution(e.target.value as ImageResolution)}
+                disabled={!canStart}
+                className="px-3 py-1.5 text-sm bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {IMAGE_RESOLUTION_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name} ({opt.size})
                   </option>
                 ))}
               </select>

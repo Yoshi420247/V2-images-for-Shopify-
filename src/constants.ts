@@ -35,6 +35,29 @@ export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; desc
   },
 ];
 
+export type ImageResolution = '1k' | '2k' | '4k';
+
+export const IMAGE_RESOLUTION_OPTIONS: { id: ImageResolution; name: string; size: string; description: string }[] = [
+  {
+    id: '1k',
+    name: '1K',
+    size: '1024x1024',
+    description: 'Standard - Lowest cost',
+  },
+  {
+    id: '2k',
+    name: '2K',
+    size: '2048x2048',
+    description: 'High quality - Balanced cost',
+  },
+  {
+    id: '4k',
+    name: '4K',
+    size: '4096x4096',
+    description: 'Ultra HD - Highest quality',
+  },
+];
+
 // ============================================
 // AI System Prompt
 // ============================================

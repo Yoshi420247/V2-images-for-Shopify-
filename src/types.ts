@@ -94,6 +94,7 @@ export interface ProductRangeSelection {
 }
 
 export type ImageGenerationModel = 'nano-banana' | 'nano-banana-pro' | 'gpt-image';
+export type ImageResolution = '1k' | '2k' | '4k';
 
 export interface GenerationSettings {
   numToGenerate: number;
@@ -104,6 +105,7 @@ export interface GenerationSettings {
   parallelProducts: number;
   brandGuidelines?: string;
   imageModel?: ImageGenerationModel;
+  imageResolution?: ImageResolution;
 }
 
 // ============================================
