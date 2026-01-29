@@ -62,7 +62,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [smartAnalyzing, setSmartAnalyzing] = useState<Set<string>>(new Set());
   const [imageModel, setImageModel] = useState<ImageGenerationModel>(
-    job.settings.imageModel || 'gemini-2.0-flash'
+    job.settings.imageModel || 'nano-banana'
   );
 
   // Processing refs
