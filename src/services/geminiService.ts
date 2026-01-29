@@ -14,10 +14,11 @@ import { MODELS, AI_STYLIST_PROMPT, SHOT_BRIEFS } from '../constants';
  * Get the Gemini model ID for the selected model type
  */
 const getGeminiModelId = (model?: ImageGenerationModel): string => {
-  if (model === 'nano-banana') {
-    return MODELS.IMAGE_GENERATION_FAST;
+  if (model === 'nano-banana-pro') {
+    return MODELS.IMAGE_GENERATION_PRO;
   }
-  return MODELS.IMAGE_GENERATION;
+  // Default to fast model (Nano Banana)
+  return MODELS.IMAGE_GENERATION_FAST;
 };
 
 // ============================================

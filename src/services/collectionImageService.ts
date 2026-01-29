@@ -204,7 +204,7 @@ CRITICAL INSTRUCTIONS:
       });
 
       const model = genai.models.generateContent({
-        model: MODELS.IMAGE_GENERATION,
+        model: MODELS.IMAGE_GENERATION_PRO,
         contents: [
           {
             role: 'user',
