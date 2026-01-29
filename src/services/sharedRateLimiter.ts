@@ -40,6 +40,13 @@ class SharedGeminiRateLimiter {
   }
 
   private detectTier(): RateLimiterTier {
+    // Check for specific tier setting first
+    const tierEnv = process.env.GEMINI_TIER;
+    if (tierEnv === 'tier2') return 'tier2';
+    if (tierEnv === 'paid' || tierEnv === 'tier1') return 'paid';
+    if (tierEnv === 'free') return 'free';
+
+    // Fallback to legacy env var
     const isPaidTier = process.env.GEMINI_PAID_TIER === 'true';
     return isPaidTier ? 'paid' : 'free';
   }
