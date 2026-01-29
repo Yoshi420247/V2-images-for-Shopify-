@@ -5,9 +5,20 @@ import {
   BackgroundOption,
   QAInfo,
   GeminiGenerationResult,
+  ImageGenerationModel,
 } from '../types';
 import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT, SHOT_BRIEFS } from '../constants';
+
+/**
+ * Get the Gemini model ID for the selected model type
+ */
+const getGeminiModelId = (model?: ImageGenerationModel): string => {
+  if (model === 'nano-banana') {
+    return MODELS.IMAGE_GENERATION_FAST;
+  }
+  return MODELS.IMAGE_GENERATION;
+};
 
 // ============================================
 // Client Initialization
@@ -269,6 +280,97 @@ Create ${shotIndices.length} detailed, specific prompts tailored to this exact p
 };
 
 /**
+ * Smart analyze an image to determine what went wrong and suggest improvements
+ * Used for the "Smart Regenerate" feature
+ */
+export const smartAnalyzeImage = async (
+  generatedImageBase64: string,
+  sourceImageBase64: string,
+  productTitle: string,
+  originalPrompt: string,
+  estimatedSize: string
+): Promise<{ analysis: string; suggestedFixes: string[] }> => {
+  const rateLimiter = getRateLimiter();
+
+  return rateLimiter.execute(
+    async () => {
+      const openai = getOpenAIClient();
+
+      const response = await openai.chat.completions.create({
+        model: MODELS.TEXT_MODEL,
+        temperature: 0.4,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert image quality analyst for e-commerce product photography.
+Your job is to compare a generated AI image against the original product photo and identify specific issues that need to be fixed.
+
+Focus on:
+1. Product accuracy - does the generated product match the original exactly?
+2. Scale and proportions - is the product the right size?
+3. Photorealism - are there any AI artifacts, distortions, or unrealistic elements?
+4. Composition issues - is the lighting, angle, or staging problematic?
+5. Content compliance - any prohibited elements (male characters, incorrect usage)?
+
+Return a JSON object:
+{
+  "analysis": "A detailed explanation of what went wrong with the generated image",
+  "suggestedFixes": ["Specific fix 1", "Specific fix 2", "..."]
+}
+
+Be specific and actionable in your suggestions.`,
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Product: "${productTitle}"
+Expected Size: ${estimatedSize}
+Original Prompt: ${originalPrompt}
+
+Compare these images and identify what went wrong with the AI-generated version.
+First image: Generated result
+Second image: Original product reference`,
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: generatedImageBase64.startsWith('data:')
+                    ? generatedImageBase64
+                    : `data:image/png;base64,${generatedImageBase64}`,
+                },
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: sourceImageBase64.startsWith('data:')
+                    ? sourceImageBase64
+                    : `data:image/jpeg;base64,${sourceImageBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('No response from smart analysis');
+      }
+
+      try {
+        return JSON.parse(content) as { analysis: string; suggestedFixes: string[] };
+      } catch {
+        throw new Error('Failed to parse smart analysis response');
+      }
+    },
+    PRIORITY.QA_CHECK
+  );
+};
+
+/**
  * Reimagine a prompt after QA failure with specific feedback
  */
 export const reimaginePrompt = async (
@@ -332,7 +434,8 @@ Create an improved prompt that addresses these issues while maintaining the orig
  */
 export const generateImageWithGemini = async (
   sourceImageBase64s: string[],
-  prompt: string
+  prompt: string,
+  imageModel?: ImageGenerationModel
 ): Promise<string> => {
   const rateLimiter = getRateLimiter();
 
@@ -351,8 +454,9 @@ export const generateImageWithGemini = async (
         };
       });
 
+      const modelId = getGeminiModelId(imageModel);
       const model = genai.models.generateContent({
-        model: MODELS.IMAGE_GENERATION,
+        model: modelId,
         contents: [
           {
             role: 'user',
@@ -527,7 +631,8 @@ export const generateImage = async (
   brandGuidelines?: string,
   isRegeneration?: boolean,
   feedback?: string,
-  previousPrompt?: string
+  previousPrompt?: string,
+  imageModel?: ImageGenerationModel
 ): Promise<GeminiGenerationResult> => {
   try {
     let prompt: string;
@@ -550,7 +655,7 @@ export const generateImage = async (
     }
 
     // Generate the image
-    const imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt);
+    const imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt, imageModel);
 
     // Perform quality check
     const qaInfo = await performQualityCheck(
@@ -582,7 +687,8 @@ export const generateMultipleImages = async (
   analysis: ProductAnalysis,
   backgroundOption: BackgroundOption,
   brandGuidelines?: string,
-  onImageGenerated?: (result: GeminiGenerationResult, index: number) => void
+  onImageGenerated?: (result: GeminiGenerationResult, index: number) => void,
+  imageModel?: ImageGenerationModel
 ): Promise<GeminiGenerationResult[]> => {
   const results: GeminiGenerationResult[] = [];
 
@@ -593,7 +699,11 @@ export const generateMultipleImages = async (
       productTitle,
       analysis,
       backgroundOption,
-      brandGuidelines
+      brandGuidelines,
+      undefined,
+      undefined,
+      undefined,
+      imageModel
     );
 
     results.push(result);

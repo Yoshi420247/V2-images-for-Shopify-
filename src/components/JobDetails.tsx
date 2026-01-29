@@ -6,11 +6,13 @@ import {
   ShopifyCredentials,
   GeneratedImage,
   ProductGenerationState,
+  ImageGenerationModel,
 } from '../types';
 import {
   analyzeProduct,
   generateImage,
   getDefaultShotIndices,
+  smartAnalyzeImage,
 } from '../services/geminiService';
 import {
   fetchProductImagesAsBase64,
@@ -18,7 +20,7 @@ import {
   deleteAllProductImages,
 } from '../services/shopifyService';
 import { persistGeneratedImage, saveJob } from '../services/supabaseService';
-import { QA_THRESHOLDS, STATUS_MESSAGES } from '../constants';
+import { QA_THRESHOLDS, STATUS_MESSAGES, IMAGE_MODEL_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
   job: GenerationJob;
@@ -28,169 +30,15 @@ interface JobDetailsProps {
   onBack: () => void;
 }
 
-const ResultCard: React.FC<{
+type ViewMode = 'grid' | 'by-product';
+type FilterMode = 'all' | 'selected' | 'approved' | 'failed';
+
+interface ImageWithContext {
   image: GeneratedImage;
-  onApprove: () => void;
-  onRegenerate: (feedback?: string) => void;
-  onView: () => void;
-}> = ({ image, onApprove, onRegenerate, onView }) => {
-  const [showFeedback, setShowFeedback] = useState(false);
-  const [feedback, setFeedback] = useState('');
-
-  const handleRegenerate = () => {
-    if (showFeedback && feedback.trim()) {
-      onRegenerate(feedback);
-      setFeedback('');
-      setShowFeedback(false);
-    } else {
-      setShowFeedback(true);
-    }
-  };
-
-  const getStatusBadge = () => {
-    switch (image.status) {
-      case 'generating':
-        return (
-          <span className="px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded">
-            Generating...
-          </span>
-        );
-      case 'success':
-        return (
-          <span className="px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded">
-            Ready
-          </span>
-        );
-      case 'uploading':
-        return (
-          <span className="px-2 py-1 text-xs bg-yellow-500/20 text-yellow-400 rounded">
-            Uploading...
-          </span>
-        );
-      case 'uploaded':
-        return (
-          <span className="px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded">
-            Uploaded
-          </span>
-        );
-      case 'qa_failed':
-        return (
-          <span className="px-2 py-1 text-xs bg-orange-500/20 text-orange-400 rounded">
-            QA Failed
-          </span>
-        );
-      case 'error':
-        return (
-          <span className="px-2 py-1 text-xs bg-red-500/20 text-red-400 rounded">
-            Error
-          </span>
-        );
-      default:
-        return null;
-    }
-  };
-
-  const imageUrl = image.imageUrl || (image.base64 ? image.base64 : '');
-
-  return (
-    <div className="bg-gray-800 rounded-lg overflow-hidden">
-      {/* Image */}
-      <div className="aspect-square bg-gray-900 relative cursor-pointer" onClick={onView}>
-        {image.status === 'generating' ? (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
-          </div>
-        ) : imageUrl ? (
-          <img
-            src={imageUrl}
-            alt="Generated"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-500">
-            No image
-          </div>
-        )}
-
-        {/* Status Badge */}
-        <div className="absolute top-2 right-2">{getStatusBadge()}</div>
-
-        {/* Approval Badge */}
-        {image.isApproved && (
-          <div className="absolute top-2 left-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-        )}
-
-        {/* Regeneration Count */}
-        {image.regenerationCount > 0 && (
-          <div className="absolute bottom-2 left-2 px-2 py-1 bg-gray-800/80 rounded text-xs text-gray-300">
-            Attempt {image.regenerationCount + 1}
-          </div>
-        )}
-      </div>
-
-      {/* Info & Actions */}
-      <div className="p-3">
-        {/* QA Info */}
-        {image.qaInfo && (
-          <div className={`mb-2 p-2 rounded text-xs ${
-            image.qaInfo.isApproved
-              ? 'bg-green-500/10 text-green-400'
-              : 'bg-orange-500/10 text-orange-400'
-          }`}>
-            <p className="font-medium">
-              {image.qaInfo.isApproved ? 'QA Passed' : 'QA Failed'}
-            </p>
-            <p className="mt-1 text-gray-400">{image.qaInfo.reasoning}</p>
-          </div>
-        )}
-
-        {/* Error */}
-        {image.error && (
-          <div className="mb-2 p-2 bg-red-500/10 rounded text-xs text-red-400">
-            {image.error}
-          </div>
-        )}
-
-        {/* Feedback Input */}
-        {showFeedback && (
-          <div className="mb-2">
-            <textarea
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Describe what to improve..."
-              rows={2}
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-2">
-          {!image.isApproved && image.status === 'success' && (
-            <button
-              onClick={onApprove}
-              className="flex-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
-            >
-              Approve
-            </button>
-          )}
-          {['success', 'qa_failed', 'error'].includes(image.status) && (
-            <button
-              onClick={handleRegenerate}
-              className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-            >
-              {showFeedback ? 'Submit' : 'Regenerate'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
+  product: ShopifyProduct;
+  productState: ProductGenerationState;
+  imageIndex: number;
+}
 
 const JobDetails: React.FC<JobDetailsProps> = ({
   job,
@@ -199,23 +47,70 @@ const JobDetails: React.FC<JobDetailsProps> = ({
   onUpdateJob,
   onBack,
 }) => {
+  // View and filter state
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [selectedProductId, setSelectedProductId] = useState<number | null>(
     job.productIds[0] || null
   );
-  const [viewingImage, setViewingImage] = useState<GeneratedImage | null>(null);
+
+  // Image viewer modal state
+  const [viewingImage, setViewingImage] = useState<ImageWithContext | null>(null);
+  const [viewingImageIndex, setViewingImageIndex] = useState<number>(0);
+
+  // Status and processing state
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [smartAnalyzing, setSmartAnalyzing] = useState<Set<string>>(new Set());
+  const [imageModel, setImageModel] = useState<ImageGenerationModel>(
+    job.settings.imageModel || 'gemini-3-pro'
+  );
+
+  // Processing refs
   const isRunningRef = useRef(false);
   const shouldStopRef = useRef(false);
-
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
-  const productState = selectedProductId
-    ? job.productStates[selectedProductId]
-    : null;
 
   const getProductsForJob = useCallback(
     () => job.productIds.map((id) => products.find((p) => p.id === id)).filter(Boolean) as ShopifyProduct[],
     [job.productIds, products]
   );
+
+  // Get all images with their context for grid view
+  const getAllImagesWithContext = useCallback((): ImageWithContext[] => {
+    const images: ImageWithContext[] = [];
+    const jobProducts = getProductsForJob();
+
+    for (const product of jobProducts) {
+      const state = job.productStates[product.id];
+      if (!state) continue;
+
+      state.generatedImages.forEach((image, index) => {
+        images.push({
+          image,
+          product,
+          productState: state,
+          imageIndex: index,
+        });
+      });
+    }
+
+    return images;
+  }, [job.productStates, getProductsForJob]);
+
+  // Filter images based on current filter mode
+  const getFilteredImages = useCallback((): ImageWithContext[] => {
+    let images = getAllImagesWithContext();
+
+    switch (filterMode) {
+      case 'selected':
+        return images.filter((i) => i.image.selectedForUpload);
+      case 'approved':
+        return images.filter((i) => i.image.isApproved || i.image.status === 'success');
+      case 'failed':
+        return images.filter((i) => i.image.status === 'qa_failed' || i.image.status === 'error');
+      default:
+        return images;
+    }
+  }, [getAllImagesWithContext, filterMode]);
 
   const updateProductState = useCallback(
     (productId: number, updater: (state: ProductGenerationState) => ProductGenerationState) => {
@@ -229,6 +124,221 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     },
     [onUpdateJob]
   );
+
+  // Toggle selection for upload
+  const toggleImageSelection = useCallback((productId: number, imageId: string) => {
+    updateProductState(productId, (s) => ({
+      ...s,
+      generatedImages: s.generatedImages.map((img) =>
+        img.id === imageId ? { ...img, selectedForUpload: !img.selectedForUpload } : img
+      ),
+    }));
+  }, [updateProductState]);
+
+  // Select all visible images
+  const selectAllVisible = useCallback(() => {
+    const filtered = getFilteredImages();
+    const productUpdates: Record<number, Set<string>> = {};
+
+    for (const item of filtered) {
+      if (!productUpdates[item.product.id]) {
+        productUpdates[item.product.id] = new Set();
+      }
+      productUpdates[item.product.id].add(item.image.id);
+    }
+
+    for (const [productIdStr, imageIds] of Object.entries(productUpdates)) {
+      const productId = Number(productIdStr);
+      updateProductState(productId, (s) => ({
+        ...s,
+        generatedImages: s.generatedImages.map((img) =>
+          imageIds.has(img.id) ? { ...img, selectedForUpload: true } : img
+        ),
+      }));
+    }
+  }, [getFilteredImages, updateProductState]);
+
+  // Deselect all visible images
+  const deselectAllVisible = useCallback(() => {
+    const filtered = getFilteredImages();
+    const productUpdates: Record<number, Set<string>> = {};
+
+    for (const item of filtered) {
+      if (!productUpdates[item.product.id]) {
+        productUpdates[item.product.id] = new Set();
+      }
+      productUpdates[item.product.id].add(item.image.id);
+    }
+
+    for (const [productIdStr, imageIds] of Object.entries(productUpdates)) {
+      const productId = Number(productIdStr);
+      updateProductState(productId, (s) => ({
+        ...s,
+        generatedImages: s.generatedImages.map((img) =>
+          imageIds.has(img.id) ? { ...img, selectedForUpload: false } : img
+        ),
+      }));
+    }
+  }, [getFilteredImages, updateProductState]);
+
+  // Smart regenerate - analyze and fix automatically
+  const handleSmartRegenerate = useCallback(async (
+    productId: number,
+    imageIndex: number,
+    image: GeneratedImage,
+    product: ShopifyProduct,
+    productState: ProductGenerationState
+  ) => {
+    if (!productState.sourceImageBase64s || !productState.analysis) {
+      console.error('Missing source images or analysis for smart regenerate');
+      return;
+    }
+
+    const imageKey = `${productId}-${image.id}`;
+    setSmartAnalyzing((prev) => new Set(prev).add(imageKey));
+
+    try {
+      // Step 1: Analyze what went wrong
+      const analysisResult = await smartAnalyzeImage(
+        image.base64 || image.imageUrl || '',
+        productState.sourceImageBase64s[0],
+        product.title,
+        image.prompt,
+        productState.analysis.estimatedSize
+      );
+
+      // Step 2: Mark as generating
+      updateProductState(productId, (s) => {
+        const images = [...s.generatedImages];
+        images[imageIndex] = {
+          ...image,
+          status: 'generating',
+          error: undefined,
+        };
+        return { ...s, generatedImages: images };
+      });
+
+      // Step 3: Regenerate with the analyzed feedback
+      const feedback = `${analysisResult.analysis}\n\nSuggested fixes:\n${analysisResult.suggestedFixes.join('\n')}`;
+      const shotIndices = getDefaultShotIndices(job.settings.numToGenerate);
+
+      const result = await generateImage(
+        productState.sourceImageBase64s,
+        shotIndices[imageIndex],
+        product.title,
+        productState.analysis,
+        job.settings.backgroundOption,
+        job.settings.brandGuidelines,
+        true,
+        feedback,
+        image.prompt,
+        imageModel
+      );
+
+      const regeneratedImage: GeneratedImage = {
+        id: image.id,
+        base64: result.base64,
+        prompt: result.prompt,
+        originalPrompt: result.originalPrompt || image.prompt,
+        status: result.qaInfo?.isApproved ? 'success' : 'qa_failed',
+        isApproved: result.qaInfo?.isApproved || false,
+        selectedForUpload: result.qaInfo?.isApproved || false,
+        qaInfo: result.qaInfo,
+        regenerationCount: image.regenerationCount + 1,
+      };
+
+      updateProductState(productId, (s) => {
+        const images = [...s.generatedImages];
+        images[imageIndex] = regeneratedImage;
+        return { ...s, generatedImages: images };
+      });
+    } catch (error) {
+      updateProductState(productId, (s) => {
+        const images = [...s.generatedImages];
+        images[imageIndex] = {
+          ...image,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Smart regeneration failed',
+        };
+        return { ...s, generatedImages: images };
+      });
+    } finally {
+      setSmartAnalyzing((prev) => {
+        const next = new Set(prev);
+        next.delete(imageKey);
+        return next;
+      });
+    }
+  }, [job.settings, updateProductState, imageModel]);
+
+  // Manual regenerate with optional feedback
+  const handleManualRegenerate = useCallback(async (
+    productId: number,
+    imageIndex: number,
+    image: GeneratedImage,
+    product: ShopifyProduct,
+    productState: ProductGenerationState,
+    feedback?: string
+  ) => {
+    if (!productState.sourceImageBase64s || !productState.analysis) {
+      console.error('Missing source images or analysis');
+      return;
+    }
+
+    updateProductState(productId, (s) => {
+      const images = [...s.generatedImages];
+      images[imageIndex] = {
+        ...image,
+        status: 'generating',
+        error: undefined,
+      };
+      return { ...s, generatedImages: images };
+    });
+
+    try {
+      const shotIndices = getDefaultShotIndices(job.settings.numToGenerate);
+      const result = await generateImage(
+        productState.sourceImageBase64s,
+        shotIndices[imageIndex],
+        product.title,
+        productState.analysis,
+        job.settings.backgroundOption,
+        job.settings.brandGuidelines,
+        true,
+        feedback || image.qaInfo?.reasoning,
+        image.prompt,
+        imageModel
+      );
+
+      const regeneratedImage: GeneratedImage = {
+        id: image.id,
+        base64: result.base64,
+        prompt: result.prompt,
+        originalPrompt: result.originalPrompt || image.prompt,
+        status: result.qaInfo?.isApproved ? 'success' : 'qa_failed',
+        isApproved: result.qaInfo?.isApproved || false,
+        selectedForUpload: result.qaInfo?.isApproved || false,
+        qaInfo: result.qaInfo,
+        regenerationCount: image.regenerationCount + 1,
+      };
+
+      updateProductState(productId, (s) => {
+        const images = [...s.generatedImages];
+        images[imageIndex] = regeneratedImage;
+        return { ...s, generatedImages: images };
+      });
+    } catch (error) {
+      updateProductState(productId, (s) => {
+        const images = [...s.generatedImages];
+        images[imageIndex] = {
+          ...image,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Regeneration failed',
+        };
+        return { ...s, generatedImages: images };
+      });
+    }
+  }, [job.settings, updateProductState, imageModel]);
 
   const processProduct = async (product: ShopifyProduct) => {
     if (shouldStopRef.current) return;
@@ -291,6 +401,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             prompt: '',
             status: 'generating',
             isApproved: false,
+            selectedForUpload: false,
             qaInfo: null,
             regenerationCount: existingImage?.regenerationCount || 0,
           };
@@ -304,7 +415,11 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             product.title,
             analysis!,
             job.settings.backgroundOption,
-            job.settings.brandGuidelines
+            job.settings.brandGuidelines,
+            undefined,
+            undefined,
+            undefined,
+            imageModel
           );
 
           const generatedImage: GeneratedImage = {
@@ -314,6 +429,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             originalPrompt: result.originalPrompt,
             status: result.qaInfo?.isApproved ? 'success' : 'qa_failed',
             isApproved: result.qaInfo?.isApproved || false,
+            selectedForUpload: result.qaInfo?.isApproved || false,
             qaInfo: result.qaInfo,
             regenerationCount: existingImage?.regenerationCount || 0,
           };
@@ -334,7 +450,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               job.settings.brandGuidelines,
               true,
               result.qaInfo?.reasoning,
-              result.prompt
+              result.prompt,
+              imageModel
             );
 
             finalImage = {
@@ -344,6 +461,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               originalPrompt: retryResult.originalPrompt || result.prompt,
               status: retryResult.qaInfo?.isApproved ? 'success' : 'qa_failed',
               isApproved: retryResult.qaInfo?.isApproved || false,
+              selectedForUpload: retryResult.qaInfo?.isApproved || false,
               qaInfo: retryResult.qaInfo,
               regenerationCount: generatedImage.regenerationCount + 1,
             };
@@ -371,6 +489,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               status: 'error',
               error: error instanceof Error ? error.message : 'Generation failed',
               isApproved: false,
+              selectedForUpload: false,
               qaInfo: null,
               regenerationCount: existingImage?.regenerationCount || 0,
             };
@@ -394,7 +513,13 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     isRunningRef.current = true;
     shouldStopRef.current = false;
 
-    onUpdateJob((j) => ({ ...j, status: 'analyzing_products', error: undefined }));
+    // Update image model in settings
+    onUpdateJob((j) => ({
+      ...j,
+      status: 'analyzing_products',
+      error: undefined,
+      settings: { ...j.settings, imageModel },
+    }));
 
     const jobProducts = getProductsForJob();
     const parallelCount = job.settings.parallelProducts;
@@ -428,7 +553,6 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     onUpdateJob((j) => ({ ...j, status: 'stopping' }));
     setStatusMessage('Stopping...');
 
-    // Set final stopped status after a short delay
     setTimeout(() => {
       if (!isRunningRef.current) {
         onUpdateJob((j) => ({ ...j, status: 'stopped' }));
@@ -436,135 +560,68 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     }, 1000);
   };
 
-  const handleApproveImage = (imageId: string) => {
-    if (!selectedProductId) return;
-
-    updateProductState(selectedProductId, (s) => ({
-      ...s,
-      generatedImages: s.generatedImages.map((img) =>
-        img.id === imageId ? { ...img, isApproved: true } : img
-      ),
-    }));
-  };
-
-  const handleRegenerateImage = async (imageIndex: number, feedback?: string) => {
-    if (!selectedProductId || !selectedProduct || !productState) return;
-
-    const image = productState.generatedImages[imageIndex];
-    if (!image) return;
-
-    const sourceImages = productState.sourceImageBase64s;
-    const analysis = productState.analysis;
-
-    if (!sourceImages || !analysis) {
-      console.error('Missing source images or analysis');
-      return;
-    }
-
-    // Mark as generating
-    updateProductState(selectedProductId, (s) => {
-      const images = [...s.generatedImages];
-      images[imageIndex] = {
-        ...image,
-        status: 'generating',
-        error: undefined,
-      };
-      return { ...s, generatedImages: images };
-    });
-
-    try {
-      const shotIndices = getDefaultShotIndices(job.settings.numToGenerate);
-      const result = await generateImage(
-        sourceImages,
-        shotIndices[imageIndex],
-        selectedProduct.title,
-        analysis,
-        job.settings.backgroundOption,
-        job.settings.brandGuidelines,
-        true,
-        feedback || image.qaInfo?.reasoning,
-        image.prompt
-      );
-
-      const regeneratedImage: GeneratedImage = {
-        id: image.id,
-        base64: result.base64,
-        prompt: result.prompt,
-        originalPrompt: result.originalPrompt || image.prompt,
-        status: result.qaInfo?.isApproved ? 'success' : 'qa_failed',
-        isApproved: result.qaInfo?.isApproved || false,
-        qaInfo: result.qaInfo,
-        regenerationCount: image.regenerationCount + 1,
-      };
-
-      updateProductState(selectedProductId, (s) => {
-        const images = [...s.generatedImages];
-        images[imageIndex] = regeneratedImage;
-        return { ...s, generatedImages: images };
-      });
-    } catch (error) {
-      updateProductState(selectedProductId, (s) => {
-        const images = [...s.generatedImages];
-        images[imageIndex] = {
-          ...image,
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Regeneration failed',
-        };
-        return { ...s, generatedImages: images };
-      });
-    }
-  };
-
-  const uploadApprovedImages = async () => {
-    if (!selectedProductId || !productState || !selectedProduct) return;
-
-    const approvedImages = productState.generatedImages.filter(
-      (img) => img.isApproved && img.status !== 'uploaded'
+  // Upload all selected images
+  const uploadSelectedImages = async () => {
+    const selectedImages = getAllImagesWithContext().filter(
+      (item) => item.image.selectedForUpload && item.image.status !== 'uploaded'
     );
 
-    if (approvedImages.length === 0) {
-      alert('No approved images to upload');
+    if (selectedImages.length === 0) {
+      alert('No images selected for upload');
       return;
     }
 
-    // Delete existing images if replace mode
-    if (job.settings.uploadMode === 'replace' && !job.settings.preserveOriginalImage) {
-      setStatusMessage('Removing existing images...');
-      await deleteAllProductImages(selectedProductId, credentials);
+    // Group by product for replace mode handling
+    const imagesByProduct: Record<number, ImageWithContext[]> = {};
+    for (const item of selectedImages) {
+      if (!imagesByProduct[item.product.id]) {
+        imagesByProduct[item.product.id] = [];
+      }
+      imagesByProduct[item.product.id].push(item);
     }
 
-    setStatusMessage(STATUS_MESSAGES.UPLOADING);
+    setStatusMessage(`Uploading ${selectedImages.length} images...`);
 
-    for (const image of approvedImages) {
-      try {
-        updateProductState(selectedProductId, (s) => ({
-          ...s,
-          generatedImages: s.generatedImages.map((img) =>
-            img.id === image.id ? { ...img, status: 'uploading' } : img
-          ),
-        }));
+    for (const [productIdStr, items] of Object.entries(imagesByProduct)) {
+      const productId = Number(productIdStr);
 
-        const imageData = image.base64 || image.imageUrl;
-        if (!imageData) continue;
+      // Delete existing images if replace mode (first product only)
+      if (job.settings.uploadMode === 'replace' && !job.settings.preserveOriginalImage) {
+        setStatusMessage('Removing existing images...');
+        await deleteAllProductImages(productId, credentials);
+      }
 
-        await uploadImage(selectedProductId, imageData, credentials);
+      for (const item of items) {
+        try {
+          updateProductState(productId, (s) => ({
+            ...s,
+            generatedImages: s.generatedImages.map((img) =>
+              img.id === item.image.id ? { ...img, status: 'uploading' } : img
+            ),
+          }));
 
-        updateProductState(selectedProductId, (s) => ({
-          ...s,
-          generatedImages: s.generatedImages.map((img) =>
-            img.id === image.id ? { ...img, status: 'uploaded' } : img
-          ),
-        }));
-      } catch (error) {
-        console.error('Upload error:', error);
-        updateProductState(selectedProductId, (s) => ({
-          ...s,
-          generatedImages: s.generatedImages.map((img) =>
-            img.id === image.id
-              ? { ...img, status: 'error', error: 'Upload failed' }
-              : img
-          ),
-        }));
+          const imageData = item.image.base64 || item.image.imageUrl;
+          if (!imageData) continue;
+
+          await uploadImage(productId, imageData, credentials);
+
+          updateProductState(productId, (s) => ({
+            ...s,
+            generatedImages: s.generatedImages.map((img) =>
+              img.id === item.image.id ? { ...img, status: 'uploaded' } : img
+            ),
+          }));
+        } catch (error) {
+          console.error('Upload error:', error);
+          updateProductState(productId, (s) => ({
+            ...s,
+            generatedImages: s.generatedImages.map((img) =>
+              img.id === item.image.id
+                ? { ...img, status: 'error', error: 'Upload failed' }
+                : img
+            ),
+          }));
+        }
       }
     }
 
@@ -576,45 +633,237 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     saveJob(job);
   }, [job]);
 
+  // Navigation in image viewer
+  const filteredImagesForViewer = getFilteredImages();
+
+  const navigateImage = (direction: 'prev' | 'next') => {
+    if (!viewingImage) return;
+
+    const currentIdx = filteredImagesForViewer.findIndex(
+      (i) => i.image.id === viewingImage.image.id
+    );
+
+    let newIdx: number;
+    if (direction === 'prev') {
+      newIdx = currentIdx > 0 ? currentIdx - 1 : filteredImagesForViewer.length - 1;
+    } else {
+      newIdx = currentIdx < filteredImagesForViewer.length - 1 ? currentIdx + 1 : 0;
+    }
+
+    setViewingImage(filteredImagesForViewer[newIdx]);
+    setViewingImageIndex(newIdx);
+  };
+
   const canStart = ['queued', 'stopped', 'failed'].includes(job.status);
   const canStop = ['analyzing_products', 'generating_images'].includes(job.status);
 
   const totalImages = job.productIds.length * job.settings.numToGenerate;
-  const completedImages = Object.values(job.productStates).reduce(
-    (sum, state) =>
-      sum +
-      state.generatedImages.filter((img) =>
-        ['success', 'uploaded'].includes(img.status)
-      ).length,
-    0
-  );
+  const allImages = getAllImagesWithContext();
+  const completedImages = allImages.filter((i) =>
+    ['success', 'uploaded'].includes(i.image.status)
+  ).length;
+  const selectedCount = allImages.filter((i) => i.image.selectedForUpload).length;
+  const failedCount = allImages.filter((i) =>
+    ['qa_failed', 'error'].includes(i.image.status)
+  ).length;
+
+  // Image Card Component
+  const ImageCard: React.FC<{
+    item: ImageWithContext;
+    showProductName?: boolean;
+  }> = ({ item, showProductName = true }) => {
+    const { image, product, productState, imageIndex } = item;
+    const imageUrl = image.imageUrl || image.base64;
+    const isAnalyzing = smartAnalyzing.has(`${product.id}-${image.id}`);
+
+    const getStatusColor = () => {
+      switch (image.status) {
+        case 'generating':
+          return 'border-blue-500';
+        case 'success':
+        case 'uploaded':
+          return image.selectedForUpload ? 'border-green-500 ring-2 ring-green-500/50' : 'border-green-500/50';
+        case 'qa_failed':
+          return 'border-orange-500';
+        case 'error':
+          return 'border-red-500';
+        default:
+          return 'border-gray-700';
+      }
+    };
+
+    return (
+      <div
+        className={`relative bg-gray-800 rounded-lg overflow-hidden border-2 transition-all ${getStatusColor()} ${
+          image.selectedForUpload ? 'shadow-lg shadow-green-500/20' : ''
+        }`}
+      >
+        {/* Checkbox overlay */}
+        {image.status !== 'generating' && image.base64 && (
+          <div className="absolute top-2 left-2 z-10">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleImageSelection(product.id, image.id);
+              }}
+              className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-all ${
+                image.selectedForUpload
+                  ? 'bg-green-500 border-green-500'
+                  : 'bg-gray-900/80 border-gray-500 hover:border-green-400'
+              }`}
+            >
+              {image.selectedForUpload && (
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Status badge */}
+        <div className="absolute top-2 right-2 z-10">
+          {image.status === 'generating' && (
+            <span className="px-2 py-1 text-xs bg-blue-500/90 text-white rounded-full">
+              Generating...
+            </span>
+          )}
+          {image.status === 'uploaded' && (
+            <span className="px-2 py-1 text-xs bg-purple-500/90 text-white rounded-full">
+              Uploaded
+            </span>
+          )}
+          {image.status === 'qa_failed' && (
+            <span className="px-2 py-1 text-xs bg-orange-500/90 text-white rounded-full">
+              QA Failed
+            </span>
+          )}
+          {image.status === 'error' && (
+            <span className="px-2 py-1 text-xs bg-red-500/90 text-white rounded-full">
+              Error
+            </span>
+          )}
+        </div>
+
+        {/* Image */}
+        <div
+          className="aspect-square bg-gray-900 cursor-pointer"
+          onClick={() => {
+            setViewingImage(item);
+            setViewingImageIndex(filteredImagesForViewer.findIndex((i) => i.image.id === image.id));
+          }}
+        >
+          {image.status === 'generating' || isAnalyzing ? (
+            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2" />
+              <span className="text-xs">{isAnalyzing ? 'Analyzing...' : 'Generating...'}</span>
+            </div>
+          ) : imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={`Generated for ${product.title}`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-500">
+              No image
+            </div>
+          )}
+        </div>
+
+        {/* Info section */}
+        <div className="p-2">
+          {showProductName && (
+            <p className="text-xs text-gray-300 truncate mb-1" title={product.title}>
+              {product.title}
+            </p>
+          )}
+
+          {/* QA info preview */}
+          {image.qaInfo && !image.qaInfo.isApproved && (
+            <p className="text-xs text-orange-400 truncate" title={image.qaInfo.reasoning}>
+              {image.qaInfo.reasoning}
+            </p>
+          )}
+
+          {/* Error message */}
+          {image.error && (
+            <p className="text-xs text-red-400 truncate" title={image.error}>
+              {image.error}
+            </p>
+          )}
+
+          {/* Action buttons */}
+          {['success', 'qa_failed', 'error'].includes(image.status) && (
+            <div className="flex gap-1 mt-2">
+              <button
+                onClick={() => handleSmartRegenerate(product.id, imageIndex, image, product, productState)}
+                disabled={isAnalyzing}
+                className="flex-1 px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white rounded transition-colors"
+                title="AI analyzes what went wrong and regenerates"
+              >
+                Smart Regen
+              </button>
+              <button
+                onClick={() => handleManualRegenerate(product.id, imageIndex, image, product, productState)}
+                className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
+
+          {/* Regeneration count */}
+          {image.regenerationCount > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Attempt {image.regenerationCount + 1}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-900">
       {/* Header */}
-      <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+      <header className="bg-gray-800 border-b border-gray-700 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center space-x-3">
               <button
                 onClick={onBack}
-                className="p-2 text-gray-400 hover:text-white"
+                className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-700"
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <div>
-                <h1 className="text-xl font-bold text-white">{job.name}</h1>
-                <p className="text-sm text-gray-400">{statusMessage || job.status}</p>
+                <h1 className="text-lg font-bold text-white">{job.name}</h1>
+                <p className="text-xs text-gray-400">{statusMessage || job.status}</p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Model selector */}
+              <select
+                value={imageModel}
+                onChange={(e) => setImageModel(e.target.value as ImageGenerationModel)}
+                disabled={!canStart}
+                className="px-3 py-1.5 text-sm bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {IMAGE_MODEL_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name}
+                  </option>
+                ))}
+              </select>
+
               {canStart && (
                 <button
                   onClick={startGeneration}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                  className="px-4 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
                 >
                   {job.status === 'queued' ? 'Start' : 'Resume'}
                 </button>
@@ -622,7 +871,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               {canStop && (
                 <button
                   onClick={stopGeneration}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                  className="px-4 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
                 >
                   Stop
                 </button>
@@ -630,15 +879,18 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="mt-4">
+          {/* Progress bar */}
+          <div className="mt-3">
             <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>Overall Progress</span>
-              <span>{completedImages} / {totalImages}</span>
+              <span>Progress: {completedImages} / {totalImages}</span>
+              <span className="flex gap-3">
+                <span className="text-green-400">{selectedCount} selected</span>
+                {failedCount > 0 && <span className="text-orange-400">{failedCount} failed</span>}
+              </span>
             </div>
             <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
               <div
-                className="h-full bg-blue-500 transition-all duration-300"
+                className="h-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-300"
                 style={{ width: `${(completedImages / totalImages) * 100}%` }}
               />
             </div>
@@ -646,118 +898,308 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Product List */}
-          <div className="lg:col-span-1">
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-white mb-4">Products</h2>
-              <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                {getProductsForJob().map((product) => {
-                  const state = job.productStates[product.id];
-                  const imageCount = state?.generatedImages.filter(
-                    (img) => ['success', 'uploaded'].includes(img.status)
-                  ).length || 0;
+      {/* Toolbar */}
+      <div className="bg-gray-800/50 border-b border-gray-700 sticky top-[104px] z-10">
+        <div className="max-w-7xl mx-auto px-4 py-2 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            {/* View mode toggle */}
+            <div className="flex items-center gap-2">
+              <div className="flex bg-gray-700 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  Grid View
+                </button>
+                <button
+                  onClick={() => setViewMode('by-product')}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    viewMode === 'by-product' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  By Product
+                </button>
+              </div>
 
-                  return (
-                    <button
-                      key={product.id}
-                      onClick={() => setSelectedProductId(product.id)}
-                      className={`w-full p-3 rounded-lg text-left transition-colors ${
-                        selectedProductId === product.id
-                          ? 'bg-blue-600'
-                          : 'bg-gray-700 hover:bg-gray-600'
-                      }`}
-                    >
-                      <p className="text-sm text-white truncate">{product.title}</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {imageCount}/{job.settings.numToGenerate} images
-                      </p>
-                    </button>
-                  );
-                })}
+              {/* Filter pills */}
+              <div className="flex gap-1">
+                {(['all', 'selected', 'approved', 'failed'] as FilterMode[]).map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setFilterMode(filter)}
+                    className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                      filterMode === filter
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                    {filter === 'selected' && selectedCount > 0 && ` (${selectedCount})`}
+                    {filter === 'failed' && failedCount > 0 && ` (${failedCount})`}
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
 
-          {/* Generated Images */}
-          <div className="lg:col-span-3">
-            {selectedProduct && productState ? (
-              <div className="bg-gray-800 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-white">
-                      {selectedProduct.title}
-                    </h2>
-                    {productState.analysis && (
-                      <p className="text-sm text-gray-400 mt-1">
-                        Size: {productState.analysis.estimatedSize}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={uploadApprovedImages}
-                    disabled={
-                      productState.generatedImages.filter((img) => img.isApproved).length === 0
-                    }
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-                  >
-                    Upload Approved
-                  </button>
-                </div>
-
-                {productState.generatedImages.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {productState.generatedImages.map((image, index) => (
-                      <ResultCard
-                        key={image.id}
-                        image={image}
-                        onApprove={() => handleApproveImage(image.id)}
-                        onRegenerate={(feedback) => handleRegenerateImage(index, feedback)}
-                        onView={() => setViewingImage(image)}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <p className="text-gray-400">
-                      No images generated yet. Start the job to generate images.
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-gray-800 rounded-lg p-8 text-center">
-                <p className="text-gray-400">Select a product to view generated images</p>
-              </div>
-            )}
+            {/* Bulk actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={selectAllVisible}
+                className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
+              >
+                Select All
+              </button>
+              <button
+                onClick={deselectAllVisible}
+                className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
+              >
+                Deselect All
+              </button>
+              <button
+                onClick={uploadSelectedImages}
+                disabled={selectedCount === 0}
+                className="px-4 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                Upload Selected ({selectedCount})
+              </button>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        {viewMode === 'grid' ? (
+          // Grid View - all images in a responsive grid
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {getFilteredImages().map((item) => (
+              <ImageCard key={`${item.product.id}-${item.image.id}`} item={item} showProductName />
+            ))}
+          </div>
+        ) : (
+          // By Product View
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Product list sidebar */}
+            <div className="lg:col-span-1">
+              <div className="bg-gray-800 rounded-lg p-3 sticky top-[160px]">
+                <h2 className="text-sm font-semibold text-white mb-3">Products</h2>
+                <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+                  {getProductsForJob().map((product) => {
+                    const state = job.productStates[product.id];
+                    const successCount = state?.generatedImages.filter(
+                      (img) => ['success', 'uploaded'].includes(img.status)
+                    ).length || 0;
+                    const selectedCount = state?.generatedImages.filter(
+                      (img) => img.selectedForUpload
+                    ).length || 0;
+
+                    return (
+                      <button
+                        key={product.id}
+                        onClick={() => setSelectedProductId(product.id)}
+                        className={`w-full p-2 rounded-lg text-left transition-colors ${
+                          selectedProductId === product.id
+                            ? 'bg-blue-600'
+                            : 'bg-gray-700 hover:bg-gray-600'
+                        }`}
+                      >
+                        <p className="text-xs text-white truncate">{product.title}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {successCount}/{job.settings.numToGenerate} done
+                          {selectedCount > 0 && (
+                            <span className="text-green-400"> · {selectedCount} selected</span>
+                          )}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Product images */}
+            <div className="lg:col-span-3">
+              {selectedProductId && job.productStates[selectedProductId] ? (
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-white">
+                        {products.find((p) => p.id === selectedProductId)?.title}
+                      </h2>
+                      {job.productStates[selectedProductId].analysis && (
+                        <p className="text-sm text-gray-400">
+                          Size: {job.productStates[selectedProductId].analysis?.estimatedSize}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {job.productStates[selectedProductId].generatedImages.map((image, index) => {
+                      const product = products.find((p) => p.id === selectedProductId)!;
+                      const item: ImageWithContext = {
+                        image,
+                        product,
+                        productState: job.productStates[selectedProductId],
+                        imageIndex: index,
+                      };
+                      return (
+                        <ImageCard
+                          key={image.id}
+                          item={item}
+                          showProductName={false}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-gray-800 rounded-lg p-8 text-center">
+                  <p className="text-gray-400">Select a product to view images</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {getFilteredImages().length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-gray-400">
+              {filterMode === 'all'
+                ? 'No images generated yet. Start the job to generate images.'
+                : `No ${filterMode} images found.`}
+            </p>
+          </div>
+        )}
       </main>
 
       {/* Image Viewer Modal */}
       {viewingImage && (
         <div
-          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4"
           onClick={() => setViewingImage(null)}
         >
-          <div className="max-w-4xl max-h-full" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={viewingImage.imageUrl || viewingImage.base64}
-              alt="Generated"
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            />
-            <div className="mt-4 bg-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-300">{viewingImage.prompt}</p>
+          <div className="relative max-w-5xl w-full max-h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Navigation */}
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
+              <button
+                onClick={() => navigateImage('prev')}
+                className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
             </div>
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10">
+              <button
+                onClick={() => navigateImage('next')}
+                className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Close button */}
             <button
               onClick={() => setViewingImage(null)}
-              className="absolute top-4 right-4 p-2 bg-gray-800 rounded-full text-white hover:bg-gray-700"
+              className="absolute top-2 right-2 p-2 bg-gray-800/80 rounded-full text-white hover:bg-gray-700 z-10"
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+
+            {/* Image */}
+            <div className="flex-1 flex items-center justify-center">
+              <img
+                src={viewingImage.image.imageUrl || viewingImage.image.base64}
+                alt="Generated"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+              />
+            </div>
+
+            {/* Info panel */}
+            <div className="mt-4 bg-gray-800 rounded-lg p-4 max-h-48 overflow-y-auto">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-white mb-1">{viewingImage.product.title}</h3>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Image {viewingImageIndex + 1} of {filteredImagesForViewer.length}
+                  </p>
+                  {viewingImage.image.prompt && (
+                    <div className="mb-2">
+                      <p className="text-xs text-gray-500 mb-1">Prompt:</p>
+                      <p className="text-xs text-gray-300">{viewingImage.image.prompt}</p>
+                    </div>
+                  )}
+                  {viewingImage.image.qaInfo && (
+                    <div className={`p-2 rounded text-xs ${
+                      viewingImage.image.qaInfo.isApproved
+                        ? 'bg-green-500/10 text-green-400'
+                        : 'bg-orange-500/10 text-orange-400'
+                    }`}>
+                      <p className="font-medium">
+                        {viewingImage.image.qaInfo.isApproved ? 'QA Passed' : 'QA Failed'}
+                      </p>
+                      <p className="mt-1 text-gray-400">{viewingImage.image.qaInfo.reasoning}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions in modal */}
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => toggleImageSelection(viewingImage.product.id, viewingImage.image.id)}
+                    className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                      viewingImage.image.selectedForUpload
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {viewingImage.image.selectedForUpload ? 'Selected' : 'Select'}
+                  </button>
+                  {['success', 'qa_failed', 'error'].includes(viewingImage.image.status) && (
+                    <>
+                      <button
+                        onClick={() => {
+                          handleSmartRegenerate(
+                            viewingImage.product.id,
+                            viewingImage.imageIndex,
+                            viewingImage.image,
+                            viewingImage.product,
+                            viewingImage.productState
+                          );
+                          setViewingImage(null);
+                        }}
+                        className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                      >
+                        Smart Regen
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleManualRegenerate(
+                            viewingImage.product.id,
+                            viewingImage.imageIndex,
+                            viewingImage.image,
+                            viewingImage.product,
+                            viewingImage.productState
+                          );
+                          setViewingImage(null);
+                        }}
+                        className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                      >
+                        Regenerate
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
