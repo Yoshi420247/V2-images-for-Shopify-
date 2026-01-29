@@ -4,6 +4,9 @@ import {
   ShopifyCollection,
   ShopifyCredentials,
   CollectionGenerationState,
+  MarketContext,
+  QueuedCollection,
+  CollectionPlan,
 } from '../types';
 import {
   fetchAllCollections,
@@ -14,6 +17,7 @@ import {
 import {
   generateCollectionImage,
   quickAnalyzeCollection,
+  regenerateWithUserFeedback,
 } from '../services/collectionImageService';
 import { QA_THRESHOLDS } from '../constants';
 
@@ -21,6 +25,55 @@ interface CollectionManagerProps {
   credentials: ShopifyCredentials;
   onBack: () => void;
 }
+
+// Preset market contexts for common industries
+const MARKET_PRESETS: { label: string; context: MarketContext }[] = [
+  {
+    label: 'Cannabis Smokeshop',
+    context: {
+      industry: 'cannabis smokeshop',
+      targetDemographic: 'cannabis enthusiasts, recreational users',
+      aestheticPreferences: 'modern, edgy, lifestyle-focused',
+      avoidElements: ['children', 'medical claims', 'consumption imagery'],
+    },
+  },
+  {
+    label: 'Cannabis Extraction',
+    context: {
+      industry: 'cannabis extraction equipment',
+      targetDemographic: 'processors, manufacturers, extraction professionals',
+      aestheticPreferences: 'industrial, technical, professional',
+      avoidElements: ['consumption', 'recreational use imagery', 'amateur setups'],
+    },
+  },
+  {
+    label: 'Vape Retail',
+    context: {
+      industry: 'vape and e-cigarette retail',
+      targetDemographic: 'adult vapers, former smokers',
+      aestheticPreferences: 'modern, sleek, lifestyle',
+      avoidElements: ['youth imagery', 'health claims', 'smoking'],
+    },
+  },
+  {
+    label: 'Head Shop',
+    context: {
+      industry: 'head shop and accessories',
+      targetDemographic: 'counter-culture enthusiasts, collectors',
+      aestheticPreferences: 'artistic, colorful, eclectic',
+      avoidElements: ['drug use imagery', 'illegal activity suggestions'],
+    },
+  },
+  {
+    label: 'Custom...',
+    context: {
+      industry: '',
+      targetDemographic: '',
+      aestheticPreferences: '',
+      avoidElements: [],
+    },
+  },
+];
 
 const CollectionManager: React.FC<CollectionManagerProps> = ({
   credentials,
@@ -34,6 +87,23 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
     Record<number, CollectionGenerationState>
   >({});
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+
+  // New state for market context
+  const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState<string>('');
+  const [customIndustry, setCustomIndustry] = useState('');
+  const [customBrandIdentity, setCustomBrandIdentity] = useState('');
+
+  // New state for queue
+  const [queuedCollections, setQueuedCollections] = useState<QueuedCollection[]>([]);
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [queueProgress, setQueueProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // New state for feedback regeneration
+  const [feedbackInput, setFeedbackInput] = useState('');
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackCollectionId, setFeedbackCollectionId] = useState<number | null>(null);
+  const [lastPlan, setLastPlan] = useState<Record<number, CollectionPlan>>({});
 
   // Load collections on mount
   useEffect(() => {
@@ -70,6 +140,32 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
     []
   );
 
+  // Handle market preset selection
+  const handlePresetChange = (presetLabel: string) => {
+    setSelectedPreset(presetLabel);
+    const preset = MARKET_PRESETS.find((p) => p.label === presetLabel);
+    if (preset && presetLabel !== 'Custom...') {
+      setMarketContext(preset.context);
+    } else if (presetLabel === 'Custom...') {
+      setMarketContext({
+        industry: customIndustry,
+        brandIdentity: customBrandIdentity,
+      });
+    } else {
+      setMarketContext(null);
+    }
+  };
+
+  // Update custom market context
+  const updateCustomContext = () => {
+    if (selectedPreset === 'Custom...') {
+      setMarketContext({
+        industry: customIndustry,
+        brandIdentity: customBrandIdentity,
+      });
+    }
+  };
+
   const initializeGenerationState = async (collection: ShopifyCollection) => {
     // Fetch sample products
     const products = await fetchCollectionProducts(collection.id, credentials, 5);
@@ -81,6 +177,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
       generatedImage: null,
       status: 'pending',
       error: null,
+      marketContext: marketContext || undefined,
     };
 
     setGenerationStates((prev) => ({
@@ -101,10 +198,11 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
       ...s,
       status: 'analyzing',
       error: null,
+      marketContext: marketContext || undefined,
     }));
 
     try {
-      const analysis = await quickAnalyzeCollection(collection, state.sampleProducts);
+      const analysis = await quickAnalyzeCollection(collection, state.sampleProducts, marketContext || undefined);
 
       updateGenerationState(collection.id, (s) => ({
         ...s,
@@ -130,6 +228,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
       ...s,
       status: 'generating',
       error: null,
+      marketContext: marketContext || undefined,
     }));
 
     try {
@@ -144,7 +243,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
         throw new Error('No product images available');
       }
 
-      // Generate the image
+      // Generate the image with market context
       const result = await generateCollectionImage(
         collection,
         state.sampleProducts,
@@ -152,8 +251,12 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
         QA_THRESHOLDS.MAX_AUTO_REGENERATIONS,
         (stage, data) => {
           console.log(`Collection ${collection.id} - ${stage}:`, data);
-        }
+        },
+        marketContext || undefined
       );
+
+      // Store the plan for potential feedback regeneration
+      setLastPlan((prev) => ({ ...prev, [collection.id]: result.plan }));
 
       const generatedImage = {
         id: uuidv4(),
@@ -177,6 +280,134 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
         error: error instanceof Error ? error.message : 'Generation failed',
       }));
     }
+  };
+
+  // Regenerate with user feedback
+  const handleFeedbackRegenerate = async () => {
+    if (!feedbackCollectionId || !feedbackInput.trim()) return;
+
+    const collection = collections.find((c) => c.id === feedbackCollectionId);
+    const state = getGenerationState(feedbackCollectionId);
+    const plan = lastPlan[feedbackCollectionId];
+
+    if (!collection || !state || !plan || !state.generatedImage?.qaResult) {
+      setShowFeedbackModal(false);
+      return;
+    }
+
+    setShowFeedbackModal(false);
+
+    updateGenerationState(feedbackCollectionId, (s) => ({
+      ...s,
+      status: 'generating',
+      error: null,
+      userFeedback: feedbackInput,
+    }));
+
+    try {
+      // Fetch product images again
+      const productImages: string[] = [];
+      for (const product of state.sampleProducts.slice(0, 3)) {
+        const images = await fetchProductImagesAsBase64(product, credentials, 1);
+        productImages.push(...images);
+      }
+
+      const result = await regenerateWithUserFeedback(
+        collection,
+        plan,
+        state.generatedImage.qaResult,
+        productImages,
+        feedbackInput,
+        marketContext || undefined
+      );
+
+      // Update stored plan
+      setLastPlan((prev) => ({ ...prev, [feedbackCollectionId]: result.plan }));
+
+      const generatedImage = {
+        id: uuidv4(),
+        base64: result.base64,
+        prompt: result.plan.analysis.suggestedImageConcept,
+        status: result.qaResult.isApproved ? ('success' as const) : ('qa_failed' as const),
+        qaResult: result.qaResult,
+        regenerationCount: (state.generatedImage?.regenerationCount || 0) + 1,
+      };
+
+      updateGenerationState(feedbackCollectionId, (s) => ({
+        ...s,
+        analysis: result.plan.analysis,
+        generatedImage,
+        status: 'pending',
+      }));
+    } catch (error) {
+      updateGenerationState(feedbackCollectionId, (s) => ({
+        ...s,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Feedback regeneration failed',
+      }));
+    }
+
+    setFeedbackInput('');
+    setFeedbackCollectionId(null);
+  };
+
+  // Queue management
+  const addToQueue = (collectionId: number) => {
+    if (queuedCollections.some((q) => q.collectionId === collectionId)) return;
+
+    setQueuedCollections((prev) => [
+      ...prev,
+      {
+        collectionId,
+        priority: prev.length,
+        addedAt: new Date(),
+      },
+    ]);
+
+    // Update status to queued
+    const collection = collections.find((c) => c.id === collectionId);
+    if (collection) {
+      initializeGenerationState(collection).then(() => {
+        updateGenerationState(collectionId, (s) => ({
+          ...s,
+          status: 'queued',
+        }));
+      });
+    }
+  };
+
+  const removeFromQueue = (collectionId: number) => {
+    setQueuedCollections((prev) => prev.filter((q) => q.collectionId !== collectionId));
+    updateGenerationState(collectionId, (s) => ({
+      ...s,
+      status: 'pending',
+    }));
+  };
+
+  const processQueue = async () => {
+    if (queuedCollections.length === 0 || isProcessingQueue) return;
+
+    setIsProcessingQueue(true);
+    setQueueProgress({ current: 0, total: queuedCollections.length });
+
+    const queue = [...queuedCollections];
+
+    for (let i = 0; i < queue.length; i++) {
+      setQueueProgress({ current: i + 1, total: queue.length });
+
+      const queuedItem = queue[i];
+      const collection = collections.find((c) => c.id === queuedItem.collectionId);
+
+      if (collection) {
+        await generateImage(collection);
+      }
+
+      // Remove from queue
+      setQueuedCollections((prev) => prev.filter((q) => q.collectionId !== queuedItem.collectionId));
+    }
+
+    setIsProcessingQueue(false);
+    setQueueProgress(null);
   };
 
   const uploadCollectionImage = async (collection: ShopifyCollection) => {
@@ -217,10 +448,21 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
 
   const getStatusBadge = (collection: ShopifyCollection) => {
     const state = getGenerationState(collection.id);
+    const isQueued = queuedCollections.some((q) => q.collectionId === collection.id);
+
+    if (isQueued && state?.status !== 'generating') {
+      return (
+        <span className="px-2 py-1 text-xs rounded bg-yellow-600 text-white">
+          Queued
+        </span>
+      );
+    }
+
     if (!state) return null;
 
     const colors = {
       pending: 'bg-gray-500',
+      queued: 'bg-yellow-600',
       analyzing: 'bg-blue-500',
       generating: 'bg-purple-500',
       uploading: 'bg-yellow-500',
@@ -230,6 +472,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
 
     const labels = {
       pending: 'Ready',
+      queued: 'Queued',
       analyzing: 'Analyzing...',
       generating: 'Generating...',
       uploading: 'Uploading...',
@@ -294,49 +537,175 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
                 </p>
               </div>
             </div>
+            {/* Queue Controls */}
+            <div className="flex items-center space-x-4">
+              {queuedCollections.length > 0 && (
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-400">
+                    {queuedCollections.length} queued
+                  </span>
+                  <button
+                    onClick={processQueue}
+                    disabled={isProcessingQueue}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-600/50 text-white rounded-lg transition-colors text-sm"
+                  >
+                    {isProcessingQueue
+                      ? `Processing ${queueProgress?.current}/${queueProgress?.total}...`
+                      : 'Process Queue'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        {/* Market Context Panel */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-6">
+          <h3 className="text-sm font-medium text-white mb-3">Market Targeting</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Industry Preset</label>
+              <select
+                value={selectedPreset}
+                onChange={(e) => handlePresetChange(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm"
+              >
+                <option value="">Select market...</option>
+                {MARKET_PRESETS.map((preset) => (
+                  <option key={preset.label} value={preset.label}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedPreset === 'Custom...' && (
+              <>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Custom Industry</label>
+                  <input
+                    type="text"
+                    value={customIndustry}
+                    onChange={(e) => setCustomIndustry(e.target.value)}
+                    onBlur={updateCustomContext}
+                    placeholder="e.g., luxury watches, organic skincare"
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Brand Identity</label>
+                  <input
+                    type="text"
+                    value={customBrandIdentity}
+                    onChange={(e) => setCustomBrandIdentity(e.target.value)}
+                    onBlur={updateCustomContext}
+                    placeholder="e.g., minimalist, eco-friendly, premium"
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm"
+                  />
+                </div>
+              </>
+            )}
+
+            {marketContext && selectedPreset !== 'Custom...' && (
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-400 mb-1">Active Context</label>
+                <div className="px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-sm text-gray-300">
+                  <span className="font-medium text-white">{marketContext.industry}</span>
+                  {marketContext.targetDemographic && (
+                    <span className="ml-2 text-gray-400">| {marketContext.targetDemographic}</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Collections List */}
           <div className="lg:col-span-1">
             <div className="bg-gray-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold text-white mb-4">
-                Collections ({collections.length})
-              </h2>
-              <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                {collections.map((collection) => (
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">
+                  Collections ({collections.length})
+                </h2>
+                {collections.length > 0 && (
                   <button
-                    key={collection.id}
-                    onClick={() => setSelectedCollectionId(collection.id)}
-                    className={`w-full p-3 rounded-lg text-left transition-colors ${
-                      selectedCollectionId === collection.id
-                        ? 'bg-blue-600'
-                        : 'bg-gray-700 hover:bg-gray-600'
-                    }`}
+                    onClick={() => {
+                      // Add all unqueued collections to queue
+                      collections.forEach((c) => {
+                        if (!queuedCollections.some((q) => q.collectionId === c.id)) {
+                          addToQueue(c.id);
+                        }
+                      });
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white truncate">{collection.title}</p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {collection.collection_type} - {collection.products_count || 0} products
-                        </p>
-                      </div>
-                      {getStatusBadge(collection)}
-                    </div>
-                    {collection.image && (
-                      <div className="mt-2 h-16 rounded overflow-hidden">
-                        <img
-                          src={collection.image.src}
-                          alt={collection.title}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    )}
+                    Queue All
                   </button>
-                ))}
+                )}
+              </div>
+              <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                {collections.map((collection) => {
+                  const isQueued = queuedCollections.some((q) => q.collectionId === collection.id);
+                  return (
+                    <div
+                      key={collection.id}
+                      className={`p-3 rounded-lg transition-colors ${
+                        selectedCollectionId === collection.id
+                          ? 'bg-blue-600'
+                          : isQueued
+                          ? 'bg-yellow-900/30 border border-yellow-600/50'
+                          : 'bg-gray-700 hover:bg-gray-600'
+                      }`}
+                    >
+                      <div
+                        className="cursor-pointer"
+                        onClick={() => setSelectedCollectionId(collection.id)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-white truncate">{collection.title}</p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {collection.collection_type} - {collection.products_count || 0} products
+                            </p>
+                          </div>
+                          {getStatusBadge(collection)}
+                        </div>
+                        {collection.image && (
+                          <div className="mt-2 h-16 rounded overflow-hidden">
+                            <img
+                              src={collection.image.src}
+                              alt={collection.title}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {/* Queue toggle button */}
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isQueued) {
+                              removeFromQueue(collection.id);
+                            } else {
+                              addToQueue(collection.id);
+                            }
+                          }}
+                          className={`text-xs px-2 py-1 rounded ${
+                            isQueued
+                              ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                              : 'bg-green-600/20 text-green-400 hover:bg-green-600/30'
+                          }`}
+                        >
+                          {isQueued ? 'Remove from Queue' : '+ Add to Queue'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -357,13 +726,25 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
                   <div className="flex space-x-2">
                     {selectedState?.generatedImage &&
                       selectedState.generatedImage.status !== 'uploaded' && (
-                        <button
-                          onClick={() => uploadCollectionImage(selectedCollection)}
-                          disabled={selectedState.status === 'uploading'}
-                          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white rounded-lg transition-colors"
-                        >
-                          Upload to Shopify
-                        </button>
+                        <>
+                          <button
+                            onClick={() => {
+                              setFeedbackCollectionId(selectedCollection.id);
+                              setShowFeedbackModal(true);
+                            }}
+                            disabled={selectedState.status === 'generating'}
+                            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/50 text-white rounded-lg transition-colors"
+                          >
+                            Feedback Regen
+                          </button>
+                          <button
+                            onClick={() => uploadCollectionImage(selectedCollection)}
+                            disabled={selectedState.status === 'uploading'}
+                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white rounded-lg transition-colors"
+                          >
+                            Upload to Shopify
+                          </button>
+                        </>
                       )}
                     <button
                       onClick={() => generateImage(selectedCollection)}
@@ -498,6 +879,14 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
                         )}
                       </div>
                     )}
+
+                    {/* User Feedback Display */}
+                    {selectedState.userFeedback && (
+                      <div className="mt-2 p-2 bg-blue-900/20 border border-blue-600/30 rounded">
+                        <p className="text-xs text-blue-400">Your feedback:</p>
+                        <p className="text-sm text-gray-300">{selectedState.userFeedback}</p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -508,7 +897,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
                       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4" />
                       <p className="text-white">Generating collection image...</p>
                       <p className="text-sm text-gray-400 mt-1">
-                        This may take a few minutes
+                        {marketContext ? `Targeting: ${marketContext.industry}` : 'Processing...'}
                       </p>
                     </div>
                   </div>
@@ -577,6 +966,51 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
           </div>
         </div>
       </main>
+
+      {/* Feedback Modal */}
+      {showFeedbackModal && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowFeedbackModal(false)}
+        >
+          <div
+            className="bg-gray-800 rounded-lg p-6 max-w-lg w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-white mb-4">
+              Feedback Regeneration
+            </h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Explain what went wrong with the generated image. Be specific about what
+              you want changed - the AI will use your feedback to create an improved version.
+            </p>
+            <textarea
+              value={feedbackInput}
+              onChange={(e) => setFeedbackInput(e.target.value)}
+              placeholder="e.g., 'The products are too small in the frame. I need them to be more prominent and centered. The lighting feels too dark for our brand aesthetic.'"
+              className="w-full h-32 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm resize-none"
+            />
+            <div className="flex justify-end space-x-3 mt-4">
+              <button
+                onClick={() => {
+                  setShowFeedbackModal(false);
+                  setFeedbackInput('');
+                }}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleFeedbackRegenerate}
+                disabled={!feedbackInput.trim()}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/50 text-white rounded-lg transition-colors"
+              >
+                Regenerate with Feedback
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Viewer Modal */}
       {viewingImage && (
