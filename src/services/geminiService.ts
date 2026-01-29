@@ -504,6 +504,57 @@ IMPORTANT:
   );
 };
 
+/**
+ * Generate an image using OpenAI GPT Image
+ * Note: OpenAI image generation doesn't use reference images directly in the same way as Gemini,
+ * so we rely on detailed prompts. The source images are kept for API consistency.
+ */
+export const generateImageWithOpenAI = async (
+  _sourceImageBase64s: string[],
+  prompt: string
+): Promise<string> => {
+  const rateLimiter = getRateLimiter();
+
+  return rateLimiter.execute(
+    async () => {
+      const openai = getOpenAIClient();
+
+      // Build the full prompt with context
+      const fullPrompt = `${AI_STYLIST_PROMPT}
+
+Generate a professional e-commerce product photograph following this brief:
+
+${prompt}
+
+IMPORTANT:
+- Create a photorealistic, commercial-quality image
+- Maintain correct scale and proportions
+- Output a high-resolution image suitable for e-commerce`;
+
+      // Use OpenAI's image generation
+      const response = await openai.images.generate({
+        model: MODELS.IMAGE_GENERATION_OPENAI,
+        prompt: fullPrompt,
+        n: 1,
+        size: '1024x1024',
+        response_format: 'b64_json',
+      });
+
+      if (!response.data || response.data.length === 0) {
+        throw new Error('No image data returned from OpenAI');
+      }
+
+      const imageData = response.data[0]?.b64_json;
+      if (!imageData) {
+        throw new Error('No image generated from OpenAI');
+      }
+
+      return `data:image/png;base64,${imageData}`;
+    },
+    PRIORITY.IMAGE_GENERATION
+  );
+};
+
 // ============================================
 // Quality Assurance
 // ============================================
@@ -655,8 +706,13 @@ export const generateImage = async (
       prompt = refinedPrompts[0];
     }
 
-    // Generate the image
-    const imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt, imageModel);
+    // Generate the image - route to appropriate provider
+    let imageBase64: string;
+    if (imageModel === 'gpt-image') {
+      imageBase64 = await generateImageWithOpenAI(sourceImageBase64s, prompt);
+    } else {
+      imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt, imageModel);
+    }
 
     // Perform quality check
     const qaInfo = await performQualityCheck(

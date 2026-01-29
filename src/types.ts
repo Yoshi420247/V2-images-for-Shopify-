@@ -93,7 +93,7 @@ export interface ProductRangeSelection {
   end: number;
 }
 
-export type ImageGenerationModel = 'nano-banana' | 'nano-banana-pro';
+export type ImageGenerationModel = 'nano-banana' | 'nano-banana-pro' | 'gpt-image';
 
 export interface GenerationSettings {
   numToGenerate: number;
