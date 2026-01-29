@@ -323,29 +323,30 @@ DO NOT: Obscure product with effects, make product secondary to scene, or lose c
 // ============================================
 
 // Gemini API IPM (Images Per Minute) limits by tier:
-// - Free: 2 IPM
-// - Tier 1 (Paid): 10 IPM
-// - Tier 2 ($250+ spend, 30+ days): 20 IPM
+// NOTE: Preview models (gemini-3-pro-image-preview) have ~50% stricter limits
+// - Free: 2 IPM (preview models may have 0)
+// - Tier 1 (Paid): 10 IPM documented, ~5 actual for preview
+// - Tier 2 ($250+ spend, 30+ days): 20 IPM documented, ~10 actual for preview
 export const RATE_LIMITER_CONFIG: Record<'free' | 'paid' | 'tier2', RateLimiterConfig> = {
   free: {
     maxConcurrent: 1,
-    minDelayBetweenRequests: 30000, // 30s between images (2 IPM)
+    minDelayBetweenRequests: 35000, // 35s between images (safe for 2 IPM)
     maxRequestsPerMinute: 2,
-    rateLimitCooldown: 60000,
+    rateLimitCooldown: 65000,
   },
   paid: {
-    // Tier 1: 10 images per minute
-    maxConcurrent: 2,
-    minDelayBetweenRequests: 7000, // 7s between images (safe margin for 10 IPM)
-    maxRequestsPerMinute: 10,
-    rateLimitCooldown: 15000,
+    // Tier 1: ~5 IPM actual for preview models (sequential only)
+    maxConcurrent: 1,
+    minDelayBetweenRequests: 12000, // 12s between images (safe for ~5 IPM preview limit)
+    maxRequestsPerMinute: 5,
+    rateLimitCooldown: 30000,
   },
   tier2: {
-    // Tier 2: 20 images per minute ($250+ spend, 30+ days)
-    maxConcurrent: 3,
-    minDelayBetweenRequests: 3500, // 3.5s between images (safe margin for 20 IPM)
-    maxRequestsPerMinute: 20,
-    rateLimitCooldown: 10000,
+    // Tier 2: ~10 IPM actual for preview models
+    maxConcurrent: 1,
+    minDelayBetweenRequests: 7000, // 7s between images
+    maxRequestsPerMinute: 10,
+    rateLimitCooldown: 20000,
   },
 };
 

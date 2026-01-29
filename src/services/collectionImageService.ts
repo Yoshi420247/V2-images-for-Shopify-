@@ -6,6 +6,7 @@ import {
   CollectionAnalysis,
   CollectionPlan,
   CollectionQAResult,
+  MarketContext,
 } from '../types';
 import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT } from '../constants';
@@ -44,12 +45,42 @@ const getOpenAIClient = (): OpenAI => {
 // ============================================
 
 /**
+ * Build market context instructions for prompts
+ */
+const buildMarketContextPrompt = (marketContext?: MarketContext): string => {
+  if (!marketContext) return '';
+
+  const parts: string[] = [];
+
+  parts.push(`\n## MARKET CONTEXT & BRAND TARGETING`);
+  parts.push(`Industry/Niche: ${marketContext.industry}`);
+
+  if (marketContext.brandIdentity) {
+    parts.push(`Brand Identity: ${marketContext.brandIdentity}`);
+  }
+  if (marketContext.targetDemographic) {
+    parts.push(`Target Demographic: ${marketContext.targetDemographic}`);
+  }
+  if (marketContext.aestheticPreferences) {
+    parts.push(`Aesthetic Style: ${marketContext.aestheticPreferences}`);
+  }
+  if (marketContext.avoidElements && marketContext.avoidElements.length > 0) {
+    parts.push(`MUST AVOID for this market: ${marketContext.avoidElements.join(', ')}`);
+  }
+
+  parts.push(`\nIMPORTANT: Tailor ALL visual decisions to appeal to the ${marketContext.industry} market.`);
+
+  return parts.join('\n');
+};
+
+/**
  * Analyze a collection and create a comprehensive plan for image generation
  */
 export const createCollectionPlan = async (
   collection: ShopifyCollection,
   sampleProducts: ShopifyProduct[],
-  productImageBase64s: string[]
+  productImageBase64s: string[],
+  marketContext?: MarketContext
 ): Promise<CollectionPlan> => {
   const rateLimiter = getRateLimiter();
 
@@ -71,6 +102,8 @@ export const createCollectionPlan = async (
           },
         }));
 
+      const marketContextPrompt = buildMarketContextPrompt(marketContext);
+
       const response = await openai.chat.completions.create({
         model: MODELS.TEXT_MODEL,
         temperature: 0.4,
@@ -79,6 +112,7 @@ export const createCollectionPlan = async (
           {
             role: 'system',
             content: `You are an expert e-commerce marketing strategist and visual merchandising specialist. Analyze the collection and create a comprehensive plan for generating a compelling collection marketing image.
+${marketContextPrompt}
 
 Return a JSON object with this structure:
 {
@@ -115,8 +149,9 @@ Description: ${collection.body_html || 'No description'}
 
 Products in Collection:
 ${productInfo}
+${marketContext ? `\nTarget Market: ${marketContext.industry}` : ''}
 
-Analyze this collection and the sample product images to create a comprehensive plan for generating an effective marketing image.`,
+Analyze this collection and the sample product images to create a comprehensive plan for generating an effective marketing image that resonates with the target market.`,
               },
               ...imageMessages,
             ],
@@ -149,13 +184,24 @@ Analyze this collection and the sample product images to create a comprehensive 
 export const generateCollectionImageWithPlan = async (
   plan: CollectionPlan,
   collection: ShopifyCollection,
-  productImageBase64s: string[]
+  productImageBase64s: string[],
+  marketContext?: MarketContext
 ): Promise<string> => {
   const rateLimiter = getRateLimiter();
 
   return rateLimiter.execute(
     async () => {
       const genai = getGeminiClient();
+
+      // Build market-specific instructions
+      const marketInstructions = marketContext
+        ? `\nMARKET TARGETING:
+This image is for the ${marketContext.industry} market.
+${marketContext.brandIdentity ? `Brand Identity: ${marketContext.brandIdentity}` : ''}
+${marketContext.targetDemographic ? `Target Audience: ${marketContext.targetDemographic}` : ''}
+${marketContext.aestheticPreferences ? `Aesthetic: ${marketContext.aestheticPreferences}` : ''}
+Ensure the image resonates with this specific market and demographic.`
+        : '';
 
       // Build comprehensive prompt from plan
       const prompt = `${AI_STYLIST_PROMPT}
@@ -166,6 +212,7 @@ Collection: "${collection.title}"
 Theme: ${plan.analysis.collectionTheme}
 Visual Style: ${plan.analysis.visualStyle}
 Marketing Angle: ${plan.analysis.marketingAngle}
+${marketInstructions}
 
 Image Concept: ${plan.analysis.suggestedImageConcept}
 
@@ -177,6 +224,7 @@ ${plan.imageRequirements.mustInclude.map((item) => `- ${item}`).join('\n')}
 
 MUST AVOID:
 ${plan.imageRequirements.mustAvoid.map((item) => `- ${item}`).join('\n')}
+${marketContext?.avoidElements ? marketContext.avoidElements.map((item) => `- ${item}`).join('\n') : ''}
 
 COLOR PALETTE: ${plan.imageRequirements.colorPalette.join(', ')}
 
@@ -355,13 +403,25 @@ Perform comprehensive quality assessment.`,
 export const createEnhancedPlan = async (
   originalPlan: CollectionPlan,
   qaResult: CollectionQAResult,
-  collection: ShopifyCollection
+  collection: ShopifyCollection,
+  marketContext?: MarketContext,
+  userFeedback?: string
 ): Promise<CollectionPlan> => {
   const rateLimiter = getRateLimiter();
 
   return rateLimiter.execute(
     async () => {
       const openai = getOpenAIClient();
+
+      const marketContextPrompt = buildMarketContextPrompt(marketContext);
+
+      const userFeedbackSection = userFeedback
+        ? `\n## USER FEEDBACK (CRITICAL - ADDRESS THIS FIRST)
+The user has provided specific feedback about what went wrong:
+"${userFeedback}"
+
+This feedback takes priority. Understand WHY the user is unhappy and make specific changes to address their concerns.`
+        : '';
 
       const response = await openai.chat.completions.create({
         model: MODELS.TEXT_MODEL,
@@ -370,9 +430,11 @@ export const createEnhancedPlan = async (
         messages: [
           {
             role: 'system',
-            content: `You are refining a collection image generation plan based on QA feedback.
+            content: `You are refining a collection image generation plan based on QA feedback and user input.
 
 The previous attempt had issues that need to be addressed. Create an improved plan that specifically addresses the problems while maintaining the original concept.
+${marketContextPrompt}
+${userFeedbackSection}
 
 Return the same JSON structure as before but with improvements:
 {
@@ -394,8 +456,9 @@ QA Feedback:
 - Issues: ${qaResult.issues.join(', ')}
 - Suggestions: ${qaResult.suggestions.join(', ')}
 - Reasoning: ${qaResult.reasoning}
+${userFeedback ? `\nUser's Feedback: "${userFeedback}"` : ''}
 
-Create an enhanced plan that addresses these issues. Add the issues to mustAvoid and incorporate suggestions into the requirements.`,
+Create an enhanced plan that addresses these issues${userFeedback ? ' AND the user feedback' : ''}. Add the issues to mustAvoid and incorporate suggestions into the requirements.`,
           },
         ],
       });
@@ -416,22 +479,76 @@ Create an enhanced plan that addresses these issues. Add the issues to mustAvoid
 };
 
 /**
+ * Regenerate collection image with user feedback
+ * This allows users to explain WHY an image was wrong and get a corrected version
+ */
+export const regenerateWithUserFeedback = async (
+  collection: ShopifyCollection,
+  originalPlan: CollectionPlan,
+  previousQaResult: CollectionQAResult,
+  productImageBase64s: string[],
+  userFeedback: string,
+  marketContext?: MarketContext,
+  onProgress?: (stage: string, data?: unknown) => void
+): Promise<{ base64: string; plan: CollectionPlan; qaResult: CollectionQAResult }> => {
+  onProgress?.('processing_feedback', { feedback: userFeedback });
+
+  // Create enhanced plan incorporating user feedback
+  const enhancedPlan = await createEnhancedPlan(
+    originalPlan,
+    previousQaResult,
+    collection,
+    marketContext,
+    userFeedback
+  );
+  onProgress?.('plan_enhanced', { plan: enhancedPlan });
+
+  // Generate new image with enhanced plan
+  onProgress?.('generating', { withFeedback: true });
+  const newImageBase64 = await generateCollectionImageWithPlan(
+    enhancedPlan,
+    collection,
+    productImageBase64s,
+    marketContext
+  );
+  onProgress?.('generation_complete', {});
+
+  // Perform QA on new image
+  onProgress?.('qa_checking', {});
+  const newQaResult = await performCollectionQA(
+    newImageBase64,
+    collection,
+    enhancedPlan,
+    productImageBase64s
+  );
+  onProgress?.('qa_complete', { qaResult: newQaResult });
+
+  return {
+    base64: newImageBase64,
+    plan: enhancedPlan,
+    qaResult: newQaResult,
+  };
+};
+
+/**
  * Retry collection image generation with enhanced plan
  */
 export const retryCollectionImage = async (
   collection: ShopifyCollection,
   originalPlan: CollectionPlan,
   qaResult: CollectionQAResult,
-  productImageBase64s: string[]
+  productImageBase64s: string[],
+  marketContext?: MarketContext
 ): Promise<{ base64: string; plan: CollectionPlan; qaResult: CollectionQAResult }> => {
   // Create enhanced plan addressing issues
-  const enhancedPlan = await createEnhancedPlan(originalPlan, qaResult, collection);
+  const enhancedPlan = await createEnhancedPlan(originalPlan, qaResult, collection, marketContext);
 
   // Generate new image with enhanced plan
   const newImageBase64 = await generateCollectionImageWithPlan(
     enhancedPlan,
     collection,
-    productImageBase64s
+    productImageBase64s,
+    marketContext
   );
 
   // Perform QA on new image
@@ -461,7 +578,8 @@ export const generateCollectionImage = async (
   sampleProducts: ShopifyProduct[],
   productImageBase64s: string[],
   maxRetries: number = 3,
-  onProgress?: (stage: string, data?: unknown) => void
+  onProgress?: (stage: string, data?: unknown) => void,
+  marketContext?: MarketContext
 ): Promise<{
   base64: string;
   plan: CollectionPlan;
@@ -470,7 +588,7 @@ export const generateCollectionImage = async (
 }> => {
   // Stage 1: Create plan
   onProgress?.('planning', { collection: collection.title });
-  const plan = await createCollectionPlan(collection, sampleProducts, productImageBase64s);
+  const plan = await createCollectionPlan(collection, sampleProducts, productImageBase64s, marketContext);
   onProgress?.('plan_complete', { plan });
 
   let currentPlan = plan;
@@ -484,7 +602,8 @@ export const generateCollectionImage = async (
     const imageBase64 = await generateCollectionImageWithPlan(
       currentPlan,
       collection,
-      productImageBase64s
+      productImageBase64s,
+      marketContext
     );
     onProgress?.('generation_complete', { attempt: attempts });
 
@@ -515,7 +634,7 @@ export const generateCollectionImage = async (
         issues: qaResult.issues,
         attempt: attempts,
       });
-      currentPlan = await createEnhancedPlan(currentPlan, qaResult, collection);
+      currentPlan = await createEnhancedPlan(currentPlan, qaResult, collection, marketContext);
     } else {
       // Return the last attempt even if not approved
       return {
@@ -539,7 +658,8 @@ export const generateCollectionImage = async (
  */
 export const quickAnalyzeCollection = async (
   collection: ShopifyCollection,
-  sampleProducts: ShopifyProduct[]
+  sampleProducts: ShopifyProduct[],
+  marketContext?: MarketContext
 ): Promise<CollectionAnalysis> => {
   const rateLimiter = getRateLimiter();
 
@@ -550,6 +670,10 @@ export const quickAnalyzeCollection = async (
       const productInfo = sampleProducts
         .map((p) => `- ${p.title}: ${p.product_type || 'General'}`)
         .join('\n');
+
+      const marketContextPrompt = marketContext
+        ? `\nIMPORTANT: This is for the ${marketContext.industry} market. Tailor the analysis to this specific niche.`
+        : '';
 
       const response = await openai.chat.completions.create({
         model: MODELS.TEXT_MODEL,
@@ -566,13 +690,13 @@ export const quickAnalyzeCollection = async (
   "keyProducts": ["Product 1", "Product 2"],
   "marketingAngle": "Key selling point",
   "suggestedImageConcept": "Brief image concept"
-}`,
+}${marketContextPrompt}`,
           },
           {
             role: 'user',
             content: `Collection: "${collection.title}"
 Description: ${collection.body_html || 'No description'}
-Products: ${productInfo}`,
+Products: ${productInfo}${marketContext ? `\nTarget Market: ${marketContext.industry}` : ''}`,
           },
         ],
       });

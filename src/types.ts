@@ -181,11 +181,23 @@ export interface GenerationJob {
 
 export type CollectionGenerationStatus =
   | 'pending'
+  | 'queued'
   | 'analyzing'
   | 'generating'
   | 'uploading'
   | 'completed'
   | 'error';
+
+/**
+ * Market context for tailoring imagery to specific niches
+ */
+export interface MarketContext {
+  industry: string; // e.g., "cannabis smokeshop", "cannabis extraction", "vape retail"
+  brandIdentity?: string; // Brand-specific guidelines
+  targetDemographic?: string; // e.g., "medical users", "recreational enthusiasts"
+  aestheticPreferences?: string; // e.g., "modern minimalist", "rustic organic"
+  avoidElements?: string[]; // Things to avoid in imagery
+}
 
 export interface CollectionGenerationState {
   collection: ShopifyCollection;
@@ -194,6 +206,17 @@ export interface CollectionGenerationState {
   generatedImage: CollectionGeneratedImage | null;
   status: CollectionGenerationStatus;
   error: string | null;
+  userFeedback?: string; // User's feedback for regeneration
+  marketContext?: MarketContext; // Market targeting context
+}
+
+/**
+ * Queued collection for batch processing
+ */
+export interface QueuedCollection {
+  collectionId: number;
+  priority: number;
+  addedAt: Date;
 }
 
 // ============================================
