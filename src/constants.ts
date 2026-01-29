@@ -10,8 +10,8 @@ export const SHOPIFY_API_VERSION = '2024-07';
 
 export const MODELS = {
   TEXT_MODEL: 'gpt-4o',
-  IMAGE_GENERATION_PRO: 'gemini-2.0-flash-exp-image-generation', // Nano Banana Pro - Gemini 3 Pro Image
-  IMAGE_GENERATION_FAST: 'gemini-2.0-flash-exp-image-generation', // Nano Banana - Gemini 2.5 Flash Preview Image
+  IMAGE_GENERATION_PRO: 'gemini-2.5-pro-image-generation', // Nano Banana Pro - Gemini Pro (highest quality)
+  IMAGE_GENERATION_FAST: 'gemini-2.5-flash-preview-image-generation', // Nano Banana - Gemini Flash (fast generation)
   IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1.5
 } as const;
 
@@ -21,12 +21,12 @@ export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; desc
   {
     id: 'nano-banana',
     name: 'Nano Banana',
-    description: 'Gemini 2.5 Flash Preview Image - Fast generation',
+    description: 'Gemini 2.5 Flash - Fast generation, lower cost',
   },
   {
     id: 'nano-banana-pro',
     name: 'Nano Banana Pro',
-    description: 'Gemini 3 Pro Image - Highest quality',
+    description: 'Gemini 2.5 Pro - Highest quality output',
   },
   {
     id: 'gpt-image',
