@@ -322,17 +322,29 @@ DO NOT: Obscure product with effects, make product secondary to scene, or lose c
 // Rate Limiter Configuration
 // ============================================
 
-export const RATE_LIMITER_CONFIG: Record<'free' | 'paid', RateLimiterConfig> = {
+// Gemini API IPM (Images Per Minute) limits by tier:
+// - Free: 2 IPM
+// - Tier 1 (Paid): 10 IPM
+// - Tier 2 ($250+ spend, 30+ days): 20 IPM
+export const RATE_LIMITER_CONFIG: Record<'free' | 'paid' | 'tier2', RateLimiterConfig> = {
   free: {
     maxConcurrent: 1,
-    minDelayBetweenRequests: 12000,
+    minDelayBetweenRequests: 30000, // 30s between images (2 IPM)
     maxRequestsPerMinute: 2,
     rateLimitCooldown: 60000,
   },
   paid: {
+    // Tier 1: 10 images per minute
+    maxConcurrent: 2,
+    minDelayBetweenRequests: 7000, // 7s between images (safe margin for 10 IPM)
+    maxRequestsPerMinute: 10,
+    rateLimitCooldown: 15000,
+  },
+  tier2: {
+    // Tier 2: 20 images per minute ($250+ spend, 30+ days)
     maxConcurrent: 3,
-    minDelayBetweenRequests: 4000,
-    maxRequestsPerMinute: 15,
+    minDelayBetweenRequests: 3500, // 3.5s between images (safe margin for 20 IPM)
+    maxRequestsPerMinute: 20,
     rateLimitCooldown: 10000,
   },
 };

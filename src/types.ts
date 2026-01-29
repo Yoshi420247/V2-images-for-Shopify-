@@ -233,7 +233,7 @@ export type AppView =
 // Rate Limiter Types
 // ============================================
 
-export type RateLimiterTier = 'free' | 'paid';
+export type RateLimiterTier = 'free' | 'paid' | 'tier2';
 
 export interface RateLimiterConfig {
   maxConcurrent: number;
