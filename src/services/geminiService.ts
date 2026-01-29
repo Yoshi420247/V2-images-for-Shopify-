@@ -6,6 +6,7 @@ import {
   QAInfo,
   GeminiGenerationResult,
   ImageGenerationModel,
+  ImageResolution,
 } from '../types';
 import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT, SHOT_BRIEFS } from '../constants';
@@ -19,6 +20,21 @@ const getGeminiModelId = (model?: ImageGenerationModel): string => {
   }
   // Default to fast model (Nano Banana)
   return MODELS.IMAGE_GENERATION_FAST;
+};
+
+/**
+ * Get the image resolution dimensions
+ */
+const getResolutionSize = (resolution?: ImageResolution): number => {
+  switch (resolution) {
+    case '4k':
+      return 4096;
+    case '2k':
+      return 2048;
+    case '1k':
+    default:
+      return 1024;
+  }
 };
 
 // ============================================
@@ -436,7 +452,8 @@ Create an improved prompt that addresses these issues while maintaining the orig
 export const generateImageWithGemini = async (
   sourceImageBase64s: string[],
   prompt: string,
-  imageModel?: ImageGenerationModel
+  imageModel?: ImageGenerationModel,
+  imageResolution?: ImageResolution
 ): Promise<string> => {
   const rateLimiter = getRateLimiter();
 
@@ -456,6 +473,8 @@ export const generateImageWithGemini = async (
       });
 
       const modelId = getGeminiModelId(imageModel);
+      const resolution = getResolutionSize(imageResolution);
+
       const model = genai.models.generateContent({
         model: modelId,
         contents: [
@@ -474,13 +493,15 @@ IMPORTANT:
 - The product in the generated image must match the reference images EXACTLY
 - Maintain correct scale and proportions
 - Create a photorealistic, commercial-quality image
-- Output a high-resolution image suitable for e-commerce`,
+- Output a ${resolution}x${resolution} pixel image suitable for e-commerce`,
               },
             ],
           },
         ],
         config: {
           responseModalities: ['image', 'text'],
+          // @ts-expect-error - Gemini API may support image size config
+          imageSize: { width: resolution, height: resolution },
         },
       });
 
@@ -499,6 +520,57 @@ IMPORTANT:
       }
 
       throw new Error('No image data in response');
+    },
+    PRIORITY.IMAGE_GENERATION
+  );
+};
+
+/**
+ * Generate an image using OpenAI GPT Image
+ * Note: OpenAI image generation doesn't use reference images directly in the same way as Gemini,
+ * so we rely on detailed prompts. The source images are kept for API consistency.
+ */
+export const generateImageWithOpenAI = async (
+  _sourceImageBase64s: string[],
+  prompt: string
+): Promise<string> => {
+  const rateLimiter = getRateLimiter();
+
+  return rateLimiter.execute(
+    async () => {
+      const openai = getOpenAIClient();
+
+      // Build the full prompt with context
+      const fullPrompt = `${AI_STYLIST_PROMPT}
+
+Generate a professional e-commerce product photograph following this brief:
+
+${prompt}
+
+IMPORTANT:
+- Create a photorealistic, commercial-quality image
+- Maintain correct scale and proportions
+- Output a high-resolution image suitable for e-commerce`;
+
+      // Use OpenAI's image generation
+      const response = await openai.images.generate({
+        model: MODELS.IMAGE_GENERATION_OPENAI,
+        prompt: fullPrompt,
+        n: 1,
+        size: '1024x1024',
+        response_format: 'b64_json',
+      });
+
+      if (!response.data || response.data.length === 0) {
+        throw new Error('No image data returned from OpenAI');
+      }
+
+      const imageData = response.data[0]?.b64_json;
+      if (!imageData) {
+        throw new Error('No image generated from OpenAI');
+      }
+
+      return `data:image/png;base64,${imageData}`;
     },
     PRIORITY.IMAGE_GENERATION
   );
@@ -633,7 +705,8 @@ export const generateImage = async (
   isRegeneration?: boolean,
   feedback?: string,
   previousPrompt?: string,
-  imageModel?: ImageGenerationModel
+  imageModel?: ImageGenerationModel,
+  imageResolution?: ImageResolution
 ): Promise<GeminiGenerationResult> => {
   try {
     let prompt: string;
@@ -655,8 +728,13 @@ export const generateImage = async (
       prompt = refinedPrompts[0];
     }
 
-    // Generate the image
-    const imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt, imageModel);
+    // Generate the image - route to appropriate provider
+    let imageBase64: string;
+    if (imageModel === 'gpt-image') {
+      imageBase64 = await generateImageWithOpenAI(sourceImageBase64s, prompt);
+    } else {
+      imageBase64 = await generateImageWithGemini(sourceImageBase64s, prompt, imageModel, imageResolution);
+    }
 
     // Perform quality check
     const qaInfo = await performQualityCheck(
@@ -689,7 +767,8 @@ export const generateMultipleImages = async (
   backgroundOption: BackgroundOption,
   brandGuidelines?: string,
   onImageGenerated?: (result: GeminiGenerationResult, index: number) => void,
-  imageModel?: ImageGenerationModel
+  imageModel?: ImageGenerationModel,
+  imageResolution?: ImageResolution
 ): Promise<GeminiGenerationResult[]> => {
   const results: GeminiGenerationResult[] = [];
 
@@ -704,7 +783,8 @@ export const generateMultipleImages = async (
       undefined,
       undefined,
       undefined,
-      imageModel
+      imageModel,
+      imageResolution
     );
 
     results.push(result);
