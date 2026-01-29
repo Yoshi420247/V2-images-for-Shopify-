@@ -83,6 +83,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterVendor, setFilterVendor] = useState<string>('all');
+  const [filterImageCount, setFilterImageCount] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'title' | 'vendor' | 'type'>('title');
   const [backgroundType, setBackgroundType] = useState<'default' | 'transparent' | 'solid' | 'gradient' | 'custom'>('default');
   const [customBackground, setCustomBackground] = useState('');
@@ -109,7 +110,29 @@ const JobCreation: React.FC<JobCreationProps> = ({
         product.vendor?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || product.product_type === filterType;
       const matchesVendor = filterVendor === 'all' || product.vendor === filterVendor;
-      return matchesSearch && matchesType && matchesVendor;
+
+      // Image count filter
+      let matchesImageCount = true;
+      const imageCount = product.images?.length || 0;
+      switch (filterImageCount) {
+        case 'none':
+          matchesImageCount = imageCount === 0;
+          break;
+        case 'single':
+          matchesImageCount = imageCount === 1;
+          break;
+        case 'few':
+          matchesImageCount = imageCount <= 2;
+          break;
+        case 'needs-images':
+          matchesImageCount = imageCount <= 1;
+          break;
+        case 'all':
+        default:
+          matchesImageCount = true;
+      }
+
+      return matchesSearch && matchesType && matchesVendor && matchesImageCount;
     });
 
     // Sort products
@@ -124,7 +147,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
           return a.title.localeCompare(b.title);
       }
     });
-  }, [products, searchQuery, filterType, filterVendor, sortBy]);
+  }, [products, searchQuery, filterType, filterVendor, filterImageCount, sortBy]);
 
   const toggleProduct = (productId: number) => {
     setSelectedProductIds((prev) => {
@@ -337,6 +360,19 @@ const JobCreation: React.FC<JobCreationProps> = ({
                           {type}
                         </option>
                       ))}
+                    </select>
+                  </div>
+                  <div>
+                    <select
+                      value={filterImageCount}
+                      onChange={(e) => setFilterImageCount(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All image counts</option>
+                      <option value="needs-images">Needs images (0-1)</option>
+                      <option value="none">No images</option>
+                      <option value="single">Single image</option>
+                      <option value="few">Few images (0-2)</option>
                     </select>
                   </div>
                 </div>

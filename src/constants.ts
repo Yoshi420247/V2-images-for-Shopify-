@@ -10,8 +10,8 @@ export const SHOPIFY_API_VERSION = '2024-07';
 
 export const MODELS = {
   TEXT_MODEL: 'gpt-4o',
-  IMAGE_GENERATION_PRO: 'gemini-2.0-flash-exp-image-generation', // Nano Banana Pro - Gemini 3 Pro Image
-  IMAGE_GENERATION_FAST: 'gemini-2.0-flash-exp-image-generation', // Nano Banana - Gemini 2.5 Flash Preview Image
+  IMAGE_GENERATION_PRO: 'gemini-2.5-pro-image-generation', // Nano Banana Pro - Gemini Pro (highest quality)
+  IMAGE_GENERATION_FAST: 'gemini-2.5-flash-preview-image-generation', // Nano Banana - Gemini Flash (fast generation)
   IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1.5
 } as const;
 
@@ -21,12 +21,12 @@ export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; desc
   {
     id: 'nano-banana',
     name: 'Nano Banana',
-    description: 'Gemini 2.5 Flash Preview Image - Fast generation',
+    description: 'Gemini 2.5 Flash - Fast generation, lower cost',
   },
   {
     id: 'nano-banana-pro',
     name: 'Nano Banana Pro',
-    description: 'Gemini 3 Pro Image - Highest quality',
+    description: 'Gemini 2.5 Pro - Highest quality output',
   },
   {
     id: 'gpt-image',
@@ -63,112 +63,256 @@ export const IMAGE_RESOLUTION_OPTIONS: { id: ImageResolution; name: string; size
 // ============================================
 
 export const AI_STYLIST_PROMPT = `
-You are a world-class e-commerce art director and photographer AI specializing in high-end product photography for online stores. Your role is to analyze products and create stunning, commercially effective product images that drive sales.
+You are a world-class commercial product photographer and digital artist creating premium e-commerce imagery. Your images must be indistinguishable from professional studio photography.
 
-Core Directives:
+## CRITICAL QUALITY REQUIREMENTS
 
-1. **Product Integrity is Absolute:** You must preserve the exact geometry, material, texture, color, and proportions of the product. Never alter, distort, or misrepresent the product in any way. The customer must receive exactly what they see.
+### Product Fidelity (HIGHEST PRIORITY)
+- The product must be rendered with EXACT accuracy to the reference image
+- Preserve precise geometry, proportions, colors, textures, and materials
+- Never add, remove, or modify product features
+- Match the exact finish (matte, glossy, metallic, transparent)
 
-2. **Scale Accuracy is Crucial:** Always depict products at their realistic size relative to any other elements in the frame. A small accessory should look small, a large appliance should look appropriately sized. Use visual cues and props scaled correctly to communicate size.
+### Photorealistic Rendering
+- Achieve professional DSLR camera quality (think Canon 5D Mark IV, Sony A7R)
+- Natural light behavior: proper reflections, refractions, caustics
+- Accurate material physics: metal reflects, glass refracts, fabric has texture
+- Realistic shadows with soft falloff, no harsh artificial edges
+- Natural depth of field appropriate to the shot type
 
-3. **Photorealistic Quality:** All images must achieve professional photography standards:
-   - Perfect lighting with natural shadows
-   - Accurate material rendering (glass should look like glass, metal like metal)
-   - Proper depth of field and focus
-   - No artifacts, distortions, or AI-generated anomalies
+### AVOID THESE AI ARTIFACTS (Critical)
+- NO warped or distorted shapes
+- NO melted or fused edges
+- NO impossible geometry or physics
+- NO repeated patterns or texture tiling issues
+- NO floating or disconnected elements
+- NO unnatural color banding or gradients
+- NO extra fingers, malformed hands, or anatomical errors
+- NO text or logos unless present in reference
+- NO blurry areas surrounded by sharp areas
 
-4. **In-Use Shots (When Specified):** When showing products in use:
-   - Demonstrate CORRECT usage only
-   - Use appropriate equipment and accessories
-   - Show realistic scenarios that match the product's intended purpose
-   - Never show improper, dangerous, or incorrect usage
+### Composition Standards
+- Use professional photography composition rules
+- Maintain proper visual hierarchy with product as focal point
+- Ensure adequate negative space for e-commerce context
+- Keep product properly lit and clearly visible
 
-5. **Cannabis/Smoke Content:** Cannabis plant imagery and smoke effects are ONLY permitted in designated lifestyle shots (typically shots 8-10). Never include cannabis or smoke in standard studio shots (1-7).
+### Human Elements (When Required)
+- ONLY feminine hands with natural, elegant appearance
+- Well-manicured nails in natural colors (nude, soft pink, clear)
+- Anatomically correct with 5 fingers, proper proportions
+- Natural skin texture and coloring
+- Relaxed, natural poses - never awkward or stiff
+- NO male hands, NO masculine features
 
-6. **No Male Characters:** If human elements are required, use only feminine hands or female models. No male characters or masculine hands should appear in any image.
+### Content Restrictions
+- Cannabis/smoke ONLY in designated lifestyle shots (8-10)
+- NO cannabis imagery in studio shots (1-7)
+- CORRECT product usage only - never show misuse
+- Age-appropriate, professional presentation
 
-7. **Hand Model Quality:** When hands appear:
-   - Use elegant, well-manicured feminine hands
-   - Natural nail colors (clear, soft pink, or nude)
-   - No jewelry or minimal, tasteful jewelry
-   - Proper proportion to the product
-   - Natural, relaxed poses
-
-Remember: You are creating commercial imagery that must be accurate, appealing, and drive purchase decisions. Every image should make the viewer want to buy the product.
+Remember: Every image must look like it was shot in a professional studio with a $50,000 camera setup. Quality over creativity - a perfect simple shot beats an ambitious flawed one.
 `;
 
 // ============================================
-// Shot Briefs
+// Shot Briefs - Detailed Photography Specifications
 // ============================================
 
 export const SHOT_BRIEFS: ShotBrief[] = [
   {
     index: 1,
     type: 'studio',
-    description: 'Clean, minimal hero shot on seamless white or light gray background. Product centered with soft, even lighting. Focus on showcasing the product\'s form and design details.',
+    description: `HERO SHOT - Clean E-commerce Primary Image
+
+CAMERA: Eye-level, straight-on angle, product perfectly centered
+LENS: 85mm equivalent, minimal distortion
+LIGHTING: Soft diffused key light from front-left (45°), fill light from right, white bounce below
+BACKGROUND: Pure seamless white (#FFFFFF) or very light gray (#F5F5F5), no gradients
+COMPOSITION: Product occupies 60-70% of frame, equal padding all sides
+FOCUS: Entire product sharp, f/8-f/11 equivalent depth of field
+STYLE: Clean, minimal, professional Amazon/Shopify hero image style
+MOOD: Bright, inviting, clearly shows product
+
+DO NOT: Add props, shadows that obscure product, dramatic angles, or artistic effects`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 2,
     type: 'studio',
-    description: '45-degree angle product shot with dramatic side lighting creating depth and dimension. Emphasize textures and materials.',
+    description: `DIMENSION SHOT - 3/4 Angle with Depth
+
+CAMERA: 45-degree angle from front-right, slightly elevated (15-20°)
+LENS: 70mm equivalent
+LIGHTING: Key light from left creating gentle shadows on right side, rim light from back-right for edge definition
+BACKGROUND: Light gray gradient, lighter at top
+COMPOSITION: Product at slight angle showing depth and form, rule of thirds
+FOCUS: Front edge sharp, gentle falloff toward back, f/5.6 equivalent
+STYLE: Editorial product photography, shows three-dimensionality
+MOOD: Sophisticated, dimensional, premium feel
+
+DO NOT: Over-dramatize shadows, lose detail in dark areas, or flatten the product`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 3,
     type: 'studio',
-    description: 'Top-down flat lay composition with complementary accessories or styling elements. Clean, organized aesthetic.',
+    description: `FLAT LAY - Top-Down Lifestyle Arrangement
+
+CAMERA: Directly overhead (90° top-down), perfectly perpendicular
+LENS: 35-50mm equivalent to minimize edge distortion
+LIGHTING: Large soft overhead light, minimal shadows, even illumination
+BACKGROUND: Clean white, light marble, or light wood surface texture
+COMPOSITION: Product centered, 2-3 small complementary props arranged with intention, negative space balanced
+FOCUS: Everything sharp, f/11+ equivalent, all elements in focus plane
+STYLE: Instagram-worthy flat lay, organized but natural
+MOOD: Lifestyle aspirational, curated, editorial
+
+DO NOT: Overcrowd with props, use unrelated items, or create messy arrangements`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 4,
     type: 'studio',
-    description: 'Close-up macro shot highlighting key features, craftsmanship, or unique design elements. Sharp focus on details.',
+    description: `DETAIL SHOT - Macro Feature Highlight
+
+CAMERA: Close-up, 1:2 to 1:1 macro perspective, angle that best shows key feature
+LENS: 100mm macro equivalent
+LIGHTING: Focused light on detail area, subtle fill to prevent harsh shadows
+BACKGROUND: Blurred (product's own body) or clean seamless
+COMPOSITION: Key feature/detail occupies 70%+ of frame, intentional crop
+FOCUS: Razor sharp on detail, shallow depth of field (f/2.8-f/4), beautiful bokeh
+STYLE: Technical precision, reveals craftsmanship and quality
+MOOD: Premium, quality-focused, attention to detail
+
+DO NOT: Show unflattering angles, dust/imperfections, or lose context of what we're seeing`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 5,
     type: 'studio',
-    description: 'Product shown with scale reference - feminine hand holding or interacting with the product to demonstrate size and ergonomics.',
+    description: `SCALE SHOT - Hand Model Interaction
+
+CAMERA: 3/4 angle showing both product and hand naturally
+LENS: 50-85mm portrait lens equivalent
+LIGHTING: Soft beauty lighting, flattering to skin, product well-lit
+BACKGROUND: Clean white or light neutral
+COMPOSITION: Elegant feminine hand holding/interacting with product naturally, hand enters from edge of frame
+FOCUS: Product sharp, hand in focus, f/4-f/5.6
+STYLE: Commercial hand model photography, shows real-world scale
+MOOD: Approachable, human connection, demonstrates size
+
+HAND REQUIREMENTS:
+- Feminine hand with slender fingers
+- Natural, well-manicured nails (nude/pink/clear polish or natural)
+- Exactly 5 fingers, anatomically perfect
+- Relaxed natural grip, not stiff or awkward
+- Clean, healthy skin appearance
+
+DO NOT: Show masculine hands, awkward grips, painted nails (unless product-relevant), or incorrect product usage`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 6,
     type: 'studio',
-    description: 'Multiple angle compilation or product family shot if applicable. Clean arrangement showing product versatility.',
+    description: `GROUP/VARIANT SHOT - Product Family Display
+
+CAMERA: Front-facing, slightly elevated to show arrangement
+LENS: 50mm equivalent for natural perspective
+LIGHTING: Even, soft lighting across all products, no harsh shadows between items
+BACKGROUND: Seamless white or light gray
+COMPOSITION: Products arranged in intentional pattern (line, arc, or grid), primary product featured prominently
+FOCUS: All products sharp, f/8-f/11, deep depth of field
+STYLE: Catalog photography, shows range/options
+MOOD: Organized, professional, comprehensive
+
+DO NOT: Overlap products confusingly, vary lighting between items, or lose any product in shadows`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 7,
     type: 'studio',
-    description: 'Creative studio shot with colored gel lighting or gradient backdrop. Modern, eye-catching aesthetic while keeping focus on product.',
+    description: `CREATIVE STUDIO - Artistic Lighting Effect
+
+CAMERA: Dynamic angle, can be unconventional but product clearly visible
+LENS: 50-85mm equivalent
+LIGHTING: Creative colored gel lighting OR dramatic single-source, adds visual interest while maintaining product visibility
+BACKGROUND: Gradient backdrop (complementary colors) or solid bold color that enhances product
+COMPOSITION: Product as clear hero, lighting creates mood without obscuring details
+FOCUS: Product sharp, f/4-f/8
+STYLE: Modern commercial, eye-catching social media worthy
+MOOD: Bold, contemporary, scroll-stopping
+
+DO NOT: Let creative lighting obscure product details, use clashing colors, or sacrifice clarity for artistry`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 8,
     type: 'in-use',
-    description: 'Lifestyle in-use shot showing product being used correctly with proper equipment. Demonstrate functionality in a realistic setting.',
+    description: `LIFESTYLE IN-USE - Functional Demonstration
+
+CAMERA: Natural viewing angle for the usage scenario
+LENS: 35-50mm environmental portrait lens equivalent
+LIGHTING: Natural or natural-looking light appropriate to setting
+BACKGROUND: Realistic environment appropriate to product use (home, outdoor, workspace)
+COMPOSITION: Product in active use, clear demonstration of function
+FOCUS: Product and interaction point sharp, environment can have gentle blur, f/4-f/5.6
+STYLE: Lifestyle editorial, aspirational but believable
+MOOD: Authentic, relatable, demonstrates value
+
+USAGE REQUIREMENTS:
+- Show CORRECT product usage only
+- Appropriate accessories and equipment if relevant
+- Realistic scenario that makes sense for the product
+
+DO NOT: Show improper use, dangerous handling, or unrealistic scenarios`,
     allowsCannabis: true,
     allowsSmoke: true,
   },
   {
     index: 9,
     type: 'premium',
-    description: 'Premium aesthetic shot on reflective black surface with dramatic lighting. High-end, luxurious feel.',
+    description: `LUXURY SHOT - Premium Black Reflective Surface
+
+CAMERA: Low angle (10-15° above surface), emphasizes product stature
+LENS: 85-100mm equivalent
+LIGHTING: Dramatic key light from above/behind creating rim lighting, controlled reflections
+BACKGROUND: Black reflective surface (acrylic/glass) showing mirror reflection, dark gradient background
+COMPOSITION: Product centered, reflection visible below, ample dark space
+FOCUS: Product sharp, reflection slightly softer, f/5.6-f/8
+STYLE: High-end luxury product photography, jewelry/watch advertising style
+MOOD: Premium, exclusive, desirable, sophisticated
+
+DO NOT: Over-expose highlights, lose detail in blacks, or make reflection distracting`,
     allowsCannabis: false,
     allowsSmoke: false,
   },
   {
     index: 10,
     type: 'lifestyle',
-    description: 'Atmospheric lifestyle shot with environmental context. May include ambient smoke, plants, or lifestyle elements appropriate to product category.',
+    description: `ATMOSPHERIC LIFESTYLE - Environmental Mood Shot
+
+CAMERA: Environmental perspective, product in context
+LENS: 35-50mm for environmental inclusion
+LIGHTING: Moody atmospheric lighting, can include practical lights in scene
+BACKGROUND: Styled environment with props, textures, plants, atmospheric elements
+COMPOSITION: Product clearly visible but as part of larger lifestyle scene
+FOCUS: Product sharp, environment at f/4 for gentle context blur
+STYLE: High-end lifestyle editorial, magazine advertisement quality
+MOOD: Aspirational, atmospheric, tells a story
+
+ALLOWED IN THIS SHOT ONLY:
+- Smoke/vapor effects if relevant to product
+- Cannabis-adjacent styling if appropriate
+- Moody/dramatic atmosphere
+
+DO NOT: Obscure product with effects, make product secondary to scene, or lose commercial viability`,
     allowsCannabis: true,
     allowsSmoke: true,
   },

@@ -234,48 +234,64 @@ export const refinePrompts = async (
 
       const response = await openai.chat.completions.create({
         model: MODELS.TEXT_MODEL,
-        temperature: 0.7,
+        temperature: 0.5,
         response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
-            content: `${AI_STYLIST_PROMPT}
+            content: `You are an expert commercial product photography director creating precise image generation prompts.
 
-You are refining shot briefs into specific, detailed prompts for AI image generation.
+Your prompts must be HIGHLY SPECIFIC and TECHNICAL, like instructions to a professional photographer.
 
-STRICT RULES:
-1. For shots 1-7: Product ONLY. No cannabis, no smoke, no lifestyle elements.
-2. For shots 8-10: May include in-use scenarios, cannabis, or smoke ONLY if allowed.
-3. NEVER include male characters or masculine hands.
-4. If hands are needed, specify "elegant feminine hands with natural manicure".
-5. Preserve exact product appearance - do not alter the product itself.
-6. Include the estimated size in prompts to ensure correct scale.
+## PROMPT STRUCTURE REQUIREMENTS
 
-Return a JSON object: { "prompts": ["prompt1", "prompt2", ...] }`,
+Each prompt MUST include:
+1. **Subject Description**: Exact product with materials, colors, and finish
+2. **Camera Specs**: Angle, distance, lens equivalent, perspective
+3. **Lighting Setup**: Key light position, fill, rim lights, modifiers
+4. **Background**: Exact color codes or description
+5. **Composition**: Framing, product placement, negative space
+6. **Technical Settings**: Depth of field, focus point, exposure style
+7. **Style Reference**: "Professional product photography" + specific style notes
+8. **Quality Anchors**: "8K detail, photorealistic, commercial quality"
+
+## ANTI-ARTIFACT INSTRUCTIONS (Include in EVERY prompt)
+Always end prompts with: "Sharp focus, no blur artifacts, no distortion, anatomically correct, physically accurate, professional retouched quality."
+
+## CRITICAL RULES
+- Shots 1-7: Product ONLY. Zero cannabis, smoke, or lifestyle elements.
+- Shots 8-10: May include lifestyle elements if allowed.
+- Hands: ONLY "elegant feminine hand with slender fingers, natural manicured nails, exactly 5 fingers"
+- Scale: Always reference "${analysis?.estimatedSize || 'accurate scale'}"
+- Never alter the product itself - exact match to reference required
+
+Return JSON: { "prompts": ["detailed prompt 1", "detailed prompt 2", ...] }`,
           },
           {
             role: 'user',
-            content: `Product: "${productTitle}"
+            content: `## PRODUCT DETAILS
+Name: "${productTitle}"
+Description: ${analysis.description}
+Physical Size: ${analysis.estimatedSize}
+Common Uses: ${analysis.useCases.join(', ')}
 
-Product Analysis:
-- Description: ${analysis.description}
-- Estimated Size: ${analysis.estimatedSize}
-- Use Cases: ${analysis.useCases.join(', ')}
+## BACKGROUND PREFERENCE
+${backgroundInstruction}
 
-Background Instruction: ${backgroundInstruction}
+${brandGuidelines ? `## BRAND GUIDELINES\n${brandGuidelines}` : ''}
 
-${brandGuidelines ? `Brand Guidelines: ${brandGuidelines}` : ''}
-
-Shot Briefs to Refine:
+## SHOTS TO CREATE (Generate one detailed prompt per shot)
 ${selectedBriefs
   .map(
     (b) =>
-      `- Shot ${b.index} (${b.type}): ${b.baseDescription}
-   Cannabis allowed: ${b.allowsCannabis}, Smoke allowed: ${b.allowsSmoke}`
+      `
+### SHOT ${b.index} - ${b.type.toUpperCase()}
+${b.baseDescription}
+Cannabis allowed: ${b.allowsCannabis}, Smoke allowed: ${b.allowsSmoke}`
   )
   .join('\n')}
 
-Create ${shotIndices.length} detailed, specific prompts tailored to this exact product.`,
+Generate ${shotIndices.length} highly detailed prompts. Each prompt should be 100-200 words with specific technical photography instructions. Remember to include anti-artifact instructions at the end of each prompt.`,
           },
         ],
       });
@@ -621,35 +637,55 @@ export const performQualityCheck = async (
 
       const response = await openai.chat.completions.create({
         model: MODELS.TEXT_MODEL,
-        temperature: 0.2,
+        temperature: 0.1,
         response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
-            content: `You are a strict quality assurance specialist for e-commerce product photography.
+            content: `You are a quality assurance specialist for e-commerce product photography. Your job is to identify images that are NOT suitable for commercial use.
 
-Evaluate the generated image against these criteria:
+## EVALUATION CRITERIA (in order of importance)
 
-1. **Product Integrity**: Does the product match the original exactly? No alterations to shape, color, or design.
-2. **Scale Accuracy**: Is the product shown at realistic scale? (Expected size: ${estimatedSize})
-3. **Photorealistic Quality**: Professional lighting, shadows, focus? No AI artifacts?
-4. **Prompt Adherence**: Does the image match the requested shot type and composition?
-5. **Content Compliance**:
-   - NO male characters or masculine hands
-   - Correct product usage if in-use shot
-   - Cannabis/smoke only in lifestyle shots
+### 1. PRODUCT ACCURACY (Critical)
+- Does the generated product closely match the reference?
+- Are the colors, shape, and key features preserved?
+- Minor stylistic differences are OK if the product is recognizable
 
-AUTO-FAIL CONDITIONS (immediately reject):
-- Wrong equipment or incorrect usage
-- Male characters or masculine hands
-- Distorted or badly rendered hands
-- Significant product alterations
-- Obvious AI artifacts or distortions
-- Wrong scale (product appears too large or too small)
+### 2. TECHNICAL QUALITY (Important)
+- Is the image sharp and well-lit?
+- Are there obvious AI artifacts? (melted edges, impossible geometry, repeated patterns)
+- Would this look professional on a product page?
+
+### 3. HAND QUALITY (If hands present)
+- Are hands anatomically correct? (5 fingers, proper proportions)
+- Do fingers look natural, not warped or fused?
+- Feminine appearance as specified?
+
+### 4. COMPOSITION (Moderate)
+- Is the product the clear focal point?
+- Is it properly framed for e-commerce?
+
+## AUTO-FAIL (Reject immediately)
+- Hands with wrong number of fingers or severely distorted
+- Product is wrong/different item entirely
+- Severe warping, melting, or impossible physics
+- Male characters or clearly masculine hands
+- Text/watermarks not in original
+- Product obscured or not visible
+
+## AUTO-PASS (Accept if these are the only issues)
+- Minor lighting differences from ideal
+- Slightly different angle than requested
+- Background color not exact match
+- Minor style differences if product is accurate
+
+Expected product size for scale reference: ${estimatedSize}
+
+Be REASONABLE - reject obvious failures but accept commercially viable images. A good-enough image is better than constant regeneration.
 
 Return JSON: {
   "isApproved": boolean,
-  "reasoning": "Detailed explanation of the decision"
+  "reasoning": "Brief explanation (1-2 sentences) of decision"
 }`,
           },
           {
