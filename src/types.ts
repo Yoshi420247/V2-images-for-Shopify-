@@ -310,48 +310,6 @@ export interface SupabaseJobRecord {
 }
 
 // ============================================
-// UI Component Props Types
-// ============================================
-
-export interface ProductCardProps {
-  product: ShopifyProduct;
-  isSelected: boolean;
-  onSelect: (productId: number) => void;
-}
-
-export interface ResultCardProps {
-  image: GeneratedImage;
-  product: ShopifyProduct;
-  onApprove: (imageId: string) => void;
-  onRegenerate: (imageId: string, feedback?: string) => void;
-  onView: (image: GeneratedImage) => void;
-}
-
-export interface JobCardProps {
-  job: GenerationJob;
-  products: ShopifyProduct[];
-  onView: (jobId: string) => void;
-  onDelete: (jobId: string) => void;
-  onResume: (jobId: string) => void;
-}
-
-// ============================================
-// Modal Types
-// ============================================
-
-export interface ImageViewerModalProps {
-  image: GeneratedImage | null;
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export interface RegenerationFeedbackModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (feedback: string) => void;
-}
-
-// ============================================
 // Event Handler Types
 // ============================================
 

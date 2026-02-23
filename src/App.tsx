@@ -28,7 +28,11 @@ const App: React.FC = () => {
   const [storeName, setStoreName] = useState<string>('');
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
+  const jobsRef = useRef<GenerationJob[]>([]);
   const pendingSaves = useRef<Set<string>>(new Set());
+
+  // Keep ref in sync so debounced saves always read the latest state
+  jobsRef.current = jobs;
 
   // Load jobs when connected
   useEffect(() => {
@@ -46,8 +50,8 @@ const App: React.FC = () => {
             await saveJob(job);
           }
         }
-      } catch (error) {
-        console.error('Failed to load jobs:', error);
+      } catch {
+        // Jobs will start fresh if loading fails
       }
     };
 
@@ -67,8 +71,7 @@ const App: React.FC = () => {
         });
         setProducts(allProducts);
         setView({ state: 'DASHBOARD' });
-      } catch (error) {
-        console.error('Failed to load products:', error);
+      } catch {
         setView({ state: 'CONNECTING' });
       }
     },
@@ -119,28 +122,25 @@ const App: React.FC = () => {
     [shopifyCreds]
   );
 
-  // Update job
+  // Update job with debounced persistence.
+  // Uses jobsRef to always read the latest state when the debounce fires,
+  // avoiding stale closure bugs.
   const handleUpdateJob = useCallback(
     (jobId: string, updater: (job: GenerationJob) => GenerationJob) => {
-      setJobs((prevJobs) => {
-        const updatedJobs = prevJobs.map((j) =>
-          j.id === jobId ? updater(j) : j
-        );
+      setJobs((prevJobs) =>
+        prevJobs.map((j) => (j.id === jobId ? updater(j) : j))
+      );
 
-        // Debounced save
-        if (!pendingSaves.current.has(jobId)) {
-          pendingSaves.current.add(jobId);
-          setTimeout(() => {
-            const jobToSave = updatedJobs.find((j) => j.id === jobId);
-            if (jobToSave) {
-              saveJob(jobToSave);
-            }
-            pendingSaves.current.delete(jobId);
-          }, 1000);
-        }
-
-        return updatedJobs;
-      });
+      if (!pendingSaves.current.has(jobId)) {
+        pendingSaves.current.add(jobId);
+        setTimeout(() => {
+          const jobToSave = jobsRef.current.find((j) => j.id === jobId);
+          if (jobToSave) {
+            saveJob(jobToSave);
+          }
+          pendingSaves.current.delete(jobId);
+        }, 1000);
+      }
     },
     []
   );

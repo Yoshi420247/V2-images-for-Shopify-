@@ -15,7 +15,7 @@ const getSupabaseClient = (): SupabaseClient | null => {
   const anonKey = process.env.SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    console.warn('Supabase not configured - falling back to localStorage only');
+    // Supabase not configured - falling back to localStorage only
     return null;
   }
 
@@ -58,8 +58,8 @@ const saveJobsToLocalStorage = (jobs: GenerationJob[]): void => {
     }));
 
     localStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(cleanJobs));
-  } catch (error) {
-    console.error('Failed to save jobs to localStorage:', error);
+  } catch {
+    // localStorage save failed silently - non-fatal
   }
 };
 
@@ -72,8 +72,7 @@ const loadJobsFromLocalStorage = (): GenerationJob[] => {
     if (!stored) return [];
 
     return JSON.parse(stored) as GenerationJob[];
-  } catch (error) {
-    console.error('Failed to load jobs from localStorage:', error);
+  } catch {
     return [];
   }
 };
@@ -128,7 +127,6 @@ export const uploadImage = async (
       });
 
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
       return null;
     }
 
@@ -138,8 +136,7 @@ export const uploadImage = async (
       .getPublicUrl(filePath);
 
     return urlData.publicUrl;
-  } catch (error) {
-    console.error('Failed to upload image:', error);
+  } catch {
     return null;
   }
 };
@@ -158,7 +155,6 @@ export const deleteJobImages = async (jobId: string): Promise<void> => {
       .list(jobId);
 
     if (listError || !files) {
-      console.error('Failed to list job images:', listError);
       return;
     }
 
@@ -168,8 +164,8 @@ export const deleteJobImages = async (jobId: string): Promise<void> => {
     if (filePaths.length > 0) {
       await client.storage.from('generated-images').remove(filePaths);
     }
-  } catch (error) {
-    console.error('Failed to delete job images:', error);
+  } catch {
+    // Image cleanup failed silently - non-fatal
   }
 };
 
@@ -247,13 +243,11 @@ export const saveJob = async (job: GenerationJob): Promise<boolean> => {
     });
 
     if (error) {
-      console.error('Supabase save error:', error);
       return true; // localStorage backup still succeeded
     }
 
     return true;
-  } catch (error) {
-    console.error('Failed to save job to Supabase:', error);
+  } catch {
     return true; // localStorage backup still succeeded
   }
 };
@@ -321,7 +315,6 @@ export const loadJobs = async (storeUrl?: string): Promise<GenerationJob[]> => {
     const { data, error } = await query;
 
     if (error) {
-      console.error('Failed to load jobs from Supabase:', error);
       return localJobs;
     }
 
@@ -346,8 +339,7 @@ export const loadJobs = async (storeUrl?: string): Promise<GenerationJob[]> => {
     return Array.from(jobMap.values()).sort(
       (a, b) => new Date(b.creationDate).getTime() - new Date(a.creationDate).getTime()
     );
-  } catch (error) {
-    console.error('Failed to load jobs:', error);
+  } catch {
     return localJobs;
   }
 };
@@ -372,13 +364,11 @@ export const deleteJob = async (jobId: string): Promise<boolean> => {
     const { error } = await client.from('jobs').delete().eq('id', jobId);
 
     if (error) {
-      console.error('Failed to delete job from Supabase:', error);
       return true; // localStorage delete succeeded
     }
 
     return true;
-  } catch (error) {
-    console.error('Failed to delete job:', error);
+  } catch {
     return true;
   }
 };
@@ -425,8 +415,8 @@ export const saveCredentials = (credentials: {
 }): void => {
   try {
     localStorage.setItem(STORAGE_KEYS.SHOPIFY_CREDENTIALS, JSON.stringify(credentials));
-  } catch (error) {
-    console.error('Failed to save credentials:', error);
+  } catch {
+    // Credential save failed - non-fatal
   }
 };
 
@@ -443,8 +433,7 @@ export const loadCredentials = (): {
     if (!stored) return null;
 
     return JSON.parse(stored);
-  } catch (error) {
-    console.error('Failed to load credentials:', error);
+  } catch {
     return null;
   }
 };
@@ -455,8 +444,8 @@ export const loadCredentials = (): {
 export const clearCredentials = (): void => {
   try {
     localStorage.removeItem(STORAGE_KEYS.SHOPIFY_CREDENTIALS);
-  } catch (error) {
-    console.error('Failed to clear credentials:', error);
+  } catch {
+    // Credential clear failed - non-fatal
   }
 };
 
@@ -470,8 +459,8 @@ export const clearCredentials = (): void => {
 export const saveGenerationSettings = (settings: Record<string, unknown>): void => {
   try {
     localStorage.setItem(STORAGE_KEYS.GENERATION_SETTINGS, JSON.stringify(settings));
-  } catch (error) {
-    console.error('Failed to save generation settings:', error);
+  } catch {
+    // Settings save failed - non-fatal
   }
 };
 
@@ -484,8 +473,7 @@ export const loadGenerationSettings = (): Record<string, unknown> | null => {
     if (!stored) return null;
 
     return JSON.parse(stored);
-  } catch (error) {
-    console.error('Failed to load generation settings:', error);
+  } catch {
     return null;
   }
 };

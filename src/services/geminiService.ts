@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import {
   ProductAnalysis,
@@ -10,6 +9,15 @@ import {
 } from '../types';
 import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT, SHOT_BRIEFS } from '../constants';
+import {
+  getGeminiClient,
+  getOpenAIClient,
+  extractAndParseJson,
+  extractChatContent,
+  extractGeminiImage,
+  toDataUrl,
+  stripDataUrlPrefix,
+} from './apiClients';
 
 /**
  * Get the Gemini model ID for the selected model type
@@ -35,35 +43,6 @@ const getResolutionSize = (resolution?: ImageResolution): number => {
     default:
       return 1024;
   }
-};
-
-// ============================================
-// Client Initialization
-// ============================================
-
-let geminiClient: GoogleGenAI | null = null;
-let openaiClient: OpenAI | null = null;
-
-const getGeminiClient = (): GoogleGenAI => {
-  if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is not configured');
-    }
-    geminiClient = new GoogleGenAI({ apiKey });
-  }
-  return geminiClient;
-};
-
-const getOpenAIClient = (): OpenAI => {
-  if (!openaiClient) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
-    }
-    openaiClient = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
-  }
-  return openaiClient;
 };
 
 // ============================================
@@ -110,7 +89,7 @@ const handleGeminiError = (error: unknown): Error => {
 // ============================================
 
 /**
- * Analyze a product using GPT-5.1 vision capabilities
+ * Analyze a product using GPT-4o vision capabilities
  * Returns description, estimated size, and use cases
  */
 export const analyzeProduct = async (
@@ -127,9 +106,7 @@ export const analyzeProduct = async (
       const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] =
         sourceImageBase64s.map((base64) => ({
           type: 'image_url' as const,
-          image_url: {
-            url: base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`,
-          },
+          image_url: { url: toDataUrl(base64) },
         }));
 
       const response = await openai.chat.completions.create({
@@ -163,17 +140,7 @@ Be specific and accurate. Focus on what you can actually see in the images.`,
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from product analysis');
-      }
-
-      try {
-        const analysis = JSON.parse(content) as ProductAnalysis;
-        return analysis;
-      } catch {
-        throw new Error('Failed to parse product analysis response');
-      }
+      return extractAndParseJson<ProductAnalysis>(response, 'product analysis');
     },
     PRIORITY.PRODUCT_ANALYSIS
   );
@@ -204,7 +171,7 @@ const getBackgroundInstruction = (option: BackgroundOption): string => {
 };
 
 /**
- * Refine generic shot briefs into product-specific prompts using GPT-5.1
+ * Refine generic shot briefs into product-specific prompts using GPT-4o
  */
 export const refinePrompts = async (
   productTitle: string,
@@ -296,17 +263,8 @@ Generate ${shotIndices.length} highly detailed prompts. Each prompt should be 10
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from prompt refinement');
-      }
-
-      try {
-        const result = JSON.parse(content) as { prompts: string[] };
-        return result.prompts;
-      } catch {
-        throw new Error('Failed to parse prompt refinement response');
-      }
+      const result = extractAndParseJson<{ prompts: string[] }>(response, 'prompt refinement');
+      return result.prompts;
     },
     PRIORITY.PROMPT_REFINEMENT
   );
@@ -369,35 +327,18 @@ Second image: Original product reference`,
               },
               {
                 type: 'image_url',
-                image_url: {
-                  url: generatedImageBase64.startsWith('data:')
-                    ? generatedImageBase64
-                    : `data:image/png;base64,${generatedImageBase64}`,
-                },
+                image_url: { url: toDataUrl(generatedImageBase64, 'image/png') },
               },
               {
                 type: 'image_url',
-                image_url: {
-                  url: sourceImageBase64.startsWith('data:')
-                    ? sourceImageBase64
-                    : `data:image/jpeg;base64,${sourceImageBase64}`,
-                },
+                image_url: { url: toDataUrl(sourceImageBase64) },
               },
             ],
           },
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from smart analysis');
-      }
-
-      try {
-        return JSON.parse(content) as { analysis: string; suggestedFixes: string[] };
-      } catch {
-        throw new Error('Failed to parse smart analysis response');
-      }
+      return extractAndParseJson<{ analysis: string; suggestedFixes: string[] }>(response, 'smart analysis');
     },
     PRIORITY.QA_CHECK
   );
@@ -447,12 +388,7 @@ Create an improved prompt that addresses these issues while maintaining the orig
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from prompt reimagination');
-      }
-
-      return content.trim();
+      return extractChatContent(response, 'prompt reimagination').trim();
     },
     PRIORITY.PROMPT_REIMAGINATION
   );
@@ -478,15 +414,12 @@ export const generateImageWithGemini = async (
       const genai = getGeminiClient();
 
       // Prepare image parts for Gemini
-      const imageParts = sourceImageBase64s.map((base64) => {
-        const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
-        return {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: cleanBase64,
-          },
-        };
-      });
+      const imageParts = sourceImageBase64s.map((base64) => ({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: stripDataUrlPrefix(base64),
+        },
+      }));
 
       const modelId = getGeminiModelId(imageModel);
       const resolution = getResolutionSize(imageResolution);
@@ -522,29 +455,16 @@ IMPORTANT:
       });
 
       const response = await model;
-
-      // Extract image from response
-      const candidate = response.candidates?.[0];
-      if (!candidate?.content?.parts) {
-        throw new Error('No image generated');
-      }
-
-      for (const part of candidate.content.parts) {
-        if ('inlineData' in part && part.inlineData?.data) {
-          return `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-        }
-      }
-
-      throw new Error('No image data in response');
+      return extractGeminiImage(response);
     },
     PRIORITY.IMAGE_GENERATION
   );
 };
 
 /**
- * Generate an image using OpenAI GPT Image
- * Note: OpenAI image generation doesn't use reference images directly in the same way as Gemini,
- * so we rely on detailed prompts. The source images are kept for API consistency.
+ * Generate an image using OpenAI GPT Image.
+ * OpenAI image generation doesn't use reference images directly,
+ * so we rely on detailed prompts.
  */
 export const generateImageWithOpenAI = async (
   _sourceImageBase64s: string[],
@@ -597,7 +517,7 @@ IMPORTANT:
 // ============================================
 
 /**
- * Perform quality check on generated image using GPT-5.1 vision
+ * Perform quality check on generated image using GPT-4o vision
  */
 export const performQualityCheck = async (
   generatedImageBase64: string,
@@ -615,11 +535,7 @@ export const performQualityCheck = async (
       const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
         {
           type: 'image_url' as const,
-          image_url: {
-            url: generatedImageBase64.startsWith('data:')
-              ? generatedImageBase64
-              : `data:image/png;base64,${generatedImageBase64}`,
-          },
+          image_url: { url: toDataUrl(generatedImageBase64, 'image/png') },
         },
       ];
 
@@ -627,11 +543,7 @@ export const performQualityCheck = async (
       if (sourceImageBase64) {
         imageMessages.push({
           type: 'image_url' as const,
-          image_url: {
-            url: sourceImageBase64.startsWith('data:')
-              ? sourceImageBase64
-              : `data:image/jpeg;base64,${sourceImageBase64}`,
-          },
+          image_url: { url: toDataUrl(sourceImageBase64) },
         });
       }
 
@@ -707,17 +619,7 @@ Perform quality check and provide your assessment.`,
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from quality check');
-      }
-
-      try {
-        const qaResult = JSON.parse(content) as QAInfo;
-        return qaResult;
-      } catch {
-        throw new Error('Failed to parse QA response');
-      }
+      return extractAndParseJson<QAInfo>(response, 'quality check');
     },
     PRIORITY.QA_CHECK
   );

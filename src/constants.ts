@@ -1,4 +1,4 @@
-import { ShotBrief, RateLimiterConfig } from './types';
+import { ShotBrief, RateLimiterConfig, ImageGenerationModel, ImageResolution } from './types';
 
 // ============================================
 // API Configuration
@@ -14,8 +14,6 @@ export const MODELS = {
   IMAGE_GENERATION_FAST: 'gemini-2.5-flash-image', // Nano Banana - Gemini 2.5 Flash (fast generation)
   IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1.5
 } as const;
-
-export type ImageGenerationModel = 'nano-banana' | 'nano-banana-pro' | 'gpt-image';
 
 export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; description: string }[] = [
   {
@@ -34,8 +32,6 @@ export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; desc
     description: 'OpenAI GPT Image - Alternative provider',
   },
 ];
-
-export type ImageResolution = '1k' | '2k' | '4k';
 
 export const IMAGE_RESOLUTION_OPTIONS: { id: ImageResolution; name: string; size: string; description: string }[] = [
   {

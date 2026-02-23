@@ -20,7 +20,7 @@ import {
   uploadImage,
   deleteAllProductImages,
 } from '../services/shopifyService';
-import { persistGeneratedImage, saveJob } from '../services/supabaseService';
+import { persistGeneratedImage } from '../services/supabaseService';
 import { QA_THRESHOLDS, STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
@@ -194,7 +194,6 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     productState: ProductGenerationState
   ) => {
     if (!productState.sourceImageBase64s || !productState.analysis) {
-      console.error('Missing source images or analysis for smart regenerate');
       return;
     }
 
@@ -274,7 +273,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         return next;
       });
     }
-  }, [job.settings, updateProductState, imageModel]);
+  }, [job.settings, updateProductState, imageModel, imageResolution]);
 
   // Manual regenerate with optional feedback
   const handleManualRegenerate = useCallback(async (
@@ -286,7 +285,6 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     feedback?: string
   ) => {
     if (!productState.sourceImageBase64s || !productState.analysis) {
-      console.error('Missing source images or analysis');
       return;
     }
 
@@ -344,7 +342,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         return { ...s, generatedImages: images };
       });
     }
-  }, [job.settings, updateProductState, imageModel]);
+  }, [job.settings, updateProductState, imageModel, imageResolution]);
 
   const processProduct = async (product: ShopifyProduct) => {
     if (shouldStopRef.current) return;
@@ -619,8 +617,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
               img.id === item.image.id ? { ...img, status: 'uploaded' } : img
             ),
           }));
-        } catch (error) {
-          console.error('Upload error:', error);
+        } catch {
           updateProductState(productId, (s) => ({
             ...s,
             generatedImages: s.generatedImages.map((img) =>
@@ -635,11 +632,6 @@ const JobDetails: React.FC<JobDetailsProps> = ({
 
     setStatusMessage('Upload complete');
   };
-
-  // Save job whenever it changes
-  useEffect(() => {
-    saveJob(job);
-  }, [job]);
 
   // Navigation in image viewer
   const filteredImagesForViewer = getFilteredImages();
@@ -661,6 +653,20 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     setViewingImage(filteredImagesForViewer[newIdx]);
     setViewingImageIndex(newIdx);
   };
+
+  // Keyboard shortcuts for image viewer modal
+  useEffect(() => {
+    if (!viewingImage) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewingImage(null);
+      if (e.key === 'ArrowLeft') navigateImage('prev');
+      if (e.key === 'ArrowRight') navigateImage('next');
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   const canStart = ['queued', 'stopped', 'failed'].includes(job.status);
   const canStop = ['analyzing_products', 'generating_images'].includes(job.status);

@@ -29,7 +29,7 @@ class SharedGeminiRateLimiter {
   private constructor() {
     this.tier = this.detectTier();
     this.config = RATE_LIMITER_CONFIG[this.tier];
-    console.log(`[RateLimiter] Initialized with ${this.tier} tier configuration`);
+    // Rate limiter ready with configured tier
   }
 
   static getInstance(): SharedGeminiRateLimiter {
@@ -57,7 +57,7 @@ class SharedGeminiRateLimiter {
   setTier(tier: RateLimiterTier): void {
     this.tier = tier;
     this.config = RATE_LIMITER_CONFIG[tier];
-    console.log(`[RateLimiter] Switched to ${tier} tier configuration`);
+    // Tier configuration updated
   }
 
   /**
@@ -123,13 +123,11 @@ class SharedGeminiRateLimiter {
    * Handle rate limit error - enter cooldown mode
    */
   handleRateLimitError(): void {
-    console.log(`[RateLimiter] Rate limit hit, entering cooldown for ${this.config.rateLimitCooldown}ms`);
     this.isInCooldown = true;
     this.cooldownEndTime = Date.now() + this.config.rateLimitCooldown;
 
     setTimeout(() => {
       this.isInCooldown = false;
-      console.log('[RateLimiter] Cooldown ended, resuming requests');
       this.processQueue();
     }, this.config.rateLimitCooldown);
   }
@@ -280,7 +278,7 @@ class SharedGeminiRateLimiter {
             60000
           );
 
-          console.log(`[RateLimiter] Retry attempt ${attempt + 1} after ${backoffDelay}ms`);
+          // Retrying after rate limit backoff
           await this.delay(backoffDelay);
           continue;
         }

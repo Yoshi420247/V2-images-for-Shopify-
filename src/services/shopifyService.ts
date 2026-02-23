@@ -394,8 +394,8 @@ export const fetchProductImagesAsBase64 = async (
     try {
       const base64 = await fetchImageAsBase64(image.src, creds);
       base64Images.push(base64);
-    } catch (error) {
-      console.error(`Failed to fetch image ${image.id}:`, error);
+    } catch {
+      // Skip images that fail to fetch
     }
   }
 

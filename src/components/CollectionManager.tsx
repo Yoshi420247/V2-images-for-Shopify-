@@ -111,8 +111,8 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
       try {
         const allCollections = await fetchAllCollections(credentials, setLoadingMessage);
         setCollections(allCollections);
-      } catch (error) {
-        console.error('Failed to load collections:', error);
+      } catch {
+        // Collections will show as empty on load failure
       } finally {
         setIsLoading(false);
       }
@@ -249,9 +249,7 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
         state.sampleProducts,
         productImages,
         QA_THRESHOLDS.MAX_AUTO_REGENERATIONS,
-        (stage, data) => {
-          console.log(`Collection ${collection.id} - ${stage}:`, data);
-        },
+        undefined,
         marketContext || undefined
       );
 
@@ -488,6 +486,24 @@ const CollectionManager: React.FC<CollectionManagerProps> = ({
       </span>
     );
   };
+
+  // Keyboard shortcuts for modals
+  useEffect(() => {
+    if (!showFeedbackModal && !viewingImage) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showFeedbackModal) {
+          setShowFeedbackModal(false);
+          setFeedbackInput('');
+        }
+        if (viewingImage) setViewingImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showFeedbackModal, viewingImage]);
 
   const selectedCollection = getSelectedCollection();
   const selectedState = selectedCollectionId
