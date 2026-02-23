@@ -22,6 +22,7 @@ import {
   deleteAllProductImages,
 } from '../services/shopifyService';
 import { persistGeneratedImage } from '../services/supabaseService';
+import { saveImageToStore, loadImageFromStore, imageKey } from '../services/imageStore';
 import { STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
@@ -59,6 +60,18 @@ const JobDetails: React.FC<JobDetailsProps> = ({
   // Image viewer modal state
   const [viewingImage, setViewingImage] = useState<ImageWithContext | null>(null);
   const [viewingImageIndex, setViewingImageIndex] = useState<number>(0);
+  const [viewerLoadedBase64, setViewerLoadedBase64] = useState<string | null>(null);
+
+  // Load full-screen viewer image from IndexedDB if needed
+  useEffect(() => {
+    setViewerLoadedBase64(null);
+    if (viewingImage && !viewingImage.image.base64 && !viewingImage.image.imageUrl) {
+      const key = imageKey(job.id, viewingImage.product.id, viewingImage.image.id);
+      loadImageFromStore(key).then((data) => {
+        if (data) setViewerLoadedBase64(data);
+      });
+    }
+  }, [viewingImage, job.id]);
 
   // Status and processing state
   const [statusMessage, setStatusMessage] = useState<string>('');
@@ -198,13 +211,20 @@ const JobDetails: React.FC<JobDetailsProps> = ({
       return;
     }
 
-    const imageKey = `${productId}-${image.id}`;
-    setSmartAnalyzing((prev) => new Set(prev).add(imageKey));
+    const analyzeKey = `${productId}-${image.id}`;
+    setSmartAnalyzing((prev) => new Set(prev).add(analyzeKey));
 
     try {
+      // Load image data from IndexedDB if not in memory
+      let imageData = image.base64 || image.imageUrl || '';
+      if (!imageData) {
+        const storedData = await loadImageFromStore(imageKey(job.id, productId, image.id));
+        if (storedData) imageData = storedData;
+      }
+
       // Step 1: Analyze what went wrong
       const analysisResult = await smartAnalyzeImage(
-        image.base64 || image.imageUrl || '',
+        imageData,
         productState.sourceImageBase64s[0],
         product.title,
         image.prompt,
@@ -270,11 +290,11 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     } finally {
       setSmartAnalyzing((prev) => {
         const next = new Set(prev);
-        next.delete(imageKey);
+        next.delete(analyzeKey);
         return next;
       });
     }
-  }, [job.settings, updateProductState, imageModel, imageResolution]);
+  }, [job, updateProductState, imageModel, imageResolution]);
 
   // Manual regenerate with optional feedback
   const handleManualRegenerate = useCallback(async (
@@ -505,29 +525,31 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             return { ...s, generatedImages: images };
           });
 
-          // Persist image to Supabase and free memory by clearing base64
+          // Save to IndexedDB first (always available, no config needed)
+          const storeKey = imageKey(job.id, productId, finalImage.id);
+          await saveImageToStore(storeKey, finalImage.base64);
+
+          // Also persist to Supabase (optional cloud backup)
           const persistResult = await persistGeneratedImage(
             { ...job, productStates: { ...job.productStates } },
             productId,
             finalImage
           );
 
-          // Clear base64 from React state after persist to free memory
-          // This is critical for large batches (1000s of products)
-          if (persistResult.imageUrl) {
-            updateProductState(productId, (s) => {
-              const images = [...s.generatedImages];
-              const idx = images.findIndex((img) => img.id === finalImage.id);
-              if (idx !== -1) {
-                images[idx] = {
-                  ...images[idx],
-                  base64: '',
-                  imageUrl: persistResult.imageUrl!,
-                };
-              }
-              return { ...s, generatedImages: images };
-            });
-          }
+          // Clear base64 from React state to free memory
+          // Image data is safely stored in IndexedDB (and optionally Supabase)
+          updateProductState(productId, (s) => {
+            const images = [...s.generatedImages];
+            const idx = images.findIndex((img) => img.id === finalImage.id);
+            if (idx !== -1) {
+              images[idx] = {
+                ...images[idx],
+                base64: '',
+                imageUrl: persistResult.imageUrl || undefined,
+              };
+            }
+            return { ...s, generatedImages: images };
+          });
         } catch (error) {
           updateProductState(productId, (s) => {
             const images = [...s.generatedImages];
@@ -665,7 +687,12 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             ),
           }));
 
-          const imageData = item.image.base64 || item.image.imageUrl;
+          let imageData = item.image.base64 || item.image.imageUrl;
+          if (!imageData) {
+            // Load from IndexedDB if not in memory
+            const stored = await loadImageFromStore(imageKey(job.id, productId, item.image.id));
+            if (stored) imageData = stored;
+          }
           if (!imageData) continue;
 
           await uploadImage(productId, imageData, credentials);
@@ -749,8 +776,19 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     showProductName?: boolean;
   }> = ({ item, showProductName = true }) => {
     const { image, product, productState, imageIndex } = item;
-    const imageUrl = image.imageUrl || image.base64;
+    const [loadedBase64, setLoadedBase64] = useState<string | null>(null);
+    const imageUrl = image.imageUrl || image.base64 || loadedBase64;
     const isAnalyzing = smartAnalyzing.has(`${product.id}-${image.id}`);
+
+    // Load image from IndexedDB if neither base64 nor imageUrl available
+    useEffect(() => {
+      if (!image.base64 && !image.imageUrl && image.status !== 'generating') {
+        const key = imageKey(job.id, product.id, image.id);
+        loadImageFromStore(key).then((data) => {
+          if (data) setLoadedBase64(data);
+        });
+      }
+    }, [image.base64, image.imageUrl, image.id, image.status, product.id]);
 
     const getStatusColor = () => {
       switch (image.status) {
@@ -775,7 +813,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         }`}
       >
         {/* Checkbox overlay */}
-        {image.status !== 'generating' && image.base64 && (
+        {image.status !== 'generating' && imageUrl && (
           <div className="absolute top-2 left-2 z-10">
             <button
               onClick={(e) => {
@@ -1207,7 +1245,7 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             {/* Image */}
             <div className="flex-1 flex items-center justify-center">
               <img
-                src={viewingImage.image.imageUrl || viewingImage.image.base64}
+                src={viewingImage.image.imageUrl || viewingImage.image.base64 || viewerLoadedBase64 || ''}
                 alt="Generated"
                 className="max-w-full max-h-[70vh] object-contain rounded-lg"
               />
