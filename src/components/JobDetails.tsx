@@ -505,12 +505,29 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             return { ...s, generatedImages: images };
           });
 
-          // Persist the image
-          await persistGeneratedImage(
+          // Persist image to Supabase and free memory by clearing base64
+          const persistResult = await persistGeneratedImage(
             { ...job, productStates: { ...job.productStates } },
             productId,
             finalImage
           );
+
+          // Clear base64 from React state after persist to free memory
+          // This is critical for large batches (1000s of products)
+          if (persistResult.imageUrl) {
+            updateProductState(productId, (s) => {
+              const images = [...s.generatedImages];
+              const idx = images.findIndex((img) => img.id === finalImage.id);
+              if (idx !== -1) {
+                images[idx] = {
+                  ...images[idx],
+                  base64: '',
+                  imageUrl: persistResult.imageUrl!,
+                };
+              }
+              return { ...s, generatedImages: images };
+            });
+          }
         } catch (error) {
           updateProductState(productId, (s) => {
             const images = [...s.generatedImages];
@@ -530,7 +547,12 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         }
       }
 
-      updateProductState(productId, (s) => ({ ...s, isGenerating: false }));
+      // Free source images from memory after product is done
+      updateProductState(productId, (s) => ({
+        ...s,
+        isGenerating: false,
+        sourceImageBase64s: null,
+      }));
     } catch (error) {
       updateProductState(productId, (s) => ({
         ...s,
