@@ -7,6 +7,8 @@ import {
   MAX_PARALLEL_PRODUCTS,
   PRESET_BACKGROUND_COLORS,
   PRESET_GRADIENTS,
+  IMAGE_MODEL_OPTIONS,
+  MODEL_BASE_COST_PER_PRODUCT,
 } from '../constants';
 
 interface JobCreationProps {
@@ -56,6 +58,13 @@ const ProductCard: React.FC<{
           {product.images.length} images
         </p>
       </div>
+      {product.status && product.status !== 'active' && (
+        <div className={`absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+          product.status === 'draft' ? 'bg-yellow-600 text-yellow-100' : 'bg-gray-600 text-gray-200'
+        }`}>
+          {product.status}
+        </div>
+      )}
       {isSelected && (
         <div className="absolute top-2 right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
           <svg
@@ -84,6 +93,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
   const [filterType, setFilterType] = useState<string>('all');
   const [filterVendor, setFilterVendor] = useState<string>('all');
   const [filterImageCount, setFilterImageCount] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'title' | 'vendor' | 'type'>('title');
   const [backgroundType, setBackgroundType] = useState<'default' | 'transparent' | 'solid' | 'gradient' | 'custom'>('default');
   const [customBackground, setCustomBackground] = useState('');
@@ -110,6 +120,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
         product.vendor?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || product.product_type === filterType;
       const matchesVendor = filterVendor === 'all' || product.vendor === filterVendor;
+      const matchesStatus = filterStatus === 'all' || product.status === filterStatus;
 
       // Image count filter
       let matchesImageCount = true;
@@ -132,7 +143,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
           matchesImageCount = true;
       }
 
-      return matchesSearch && matchesType && matchesVendor && matchesImageCount;
+      return matchesSearch && matchesType && matchesVendor && matchesImageCount && matchesStatus;
     });
 
     // Sort products
@@ -147,7 +158,7 @@ const JobCreation: React.FC<JobCreationProps> = ({
           return a.title.localeCompare(b.title);
       }
     });
-  }, [products, searchQuery, filterType, filterVendor, filterImageCount, sortBy]);
+  }, [products, searchQuery, filterType, filterVendor, filterImageCount, filterStatus, sortBy]);
 
   const toggleProduct = (productId: number) => {
     setSelectedProductIds((prev) => {
@@ -375,6 +386,18 @@ const JobCreation: React.FC<JobCreationProps> = ({
                       <option value="few">Few images (0-2)</option>
                     </select>
                   </div>
+                  <div>
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All statuses</option>
+                      <option value="active">Active</option>
+                      <option value="draft">Draft</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-400">Sort by:</span>
@@ -467,6 +490,51 @@ const JobCreation: React.FC<JobCreationProps> = ({
                   <div className="flex justify-between text-xs text-gray-400">
                     <span>{MIN_IMAGES_PER_PRODUCT}</span>
                     <span>{MAX_IMAGES_PER_PRODUCT}</span>
+                  </div>
+                </div>
+
+                {/* Image Generation Model */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Image Generation Model
+                  </label>
+                  <div className="space-y-2">
+                    {IMAGE_MODEL_OPTIONS.map((model) => (
+                      <label
+                        key={model.id}
+                        className={`flex items-center p-3 rounded-lg cursor-pointer border-2 transition-all ${
+                          (settings.imageModel || 'nano-banana') === model.id
+                            ? 'border-blue-500 bg-gray-700'
+                            : 'border-gray-600 bg-gray-750 hover:border-gray-500'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="imageModel"
+                          value={model.id}
+                          checked={(settings.imageModel || 'nano-banana') === model.id}
+                          onChange={() =>
+                            setSettings((s) => ({ ...s, imageModel: model.id }))
+                          }
+                          className="sr-only"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-white">{model.name}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                              model.costTier === '$' ? 'bg-green-700 text-green-100' :
+                              model.costTier === '$$' ? 'bg-yellow-700 text-yellow-100' :
+                              'bg-red-700 text-red-100'
+                            }`}>
+                              {model.costTier}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {model.description} &middot; {model.speedTier} &middot; {model.qualityTier} quality &middot; ~${model.costPerImage.toFixed(2)}/img
+                          </p>
+                        </div>
+                      </label>
+                    ))}
                   </div>
                 </div>
 
@@ -693,6 +761,11 @@ const JobCreation: React.FC<JobCreationProps> = ({
                       : 0;
                     const activeCount = selectedProductIds.size - skippedCount;
                     const totalImages = activeCount * settings.numToGenerate;
+                    const selectedModel = IMAGE_MODEL_OPTIONS.find((m) => m.id === (settings.imageModel || 'nano-banana')) || IMAGE_MODEL_OPTIONS[0];
+                    const costPerProduct = MODEL_BASE_COST_PER_PRODUCT + (settings.numToGenerate * selectedModel.costPerImage);
+                    const totalCost = activeCount * costPerProduct;
+                    const retryMultiplier = 1 + ((settings.maxAutoRetries ?? 1) * 0.15);
+                    const estCostWithRetries = totalCost * retryMultiplier;
 
                     return (
                       <ul className="text-sm text-gray-400 space-y-1">
@@ -705,8 +778,9 @@ const JobCreation: React.FC<JobCreationProps> = ({
                         <li>Products to process: {activeCount}</li>
                         <li>Images per product: {settings.numToGenerate}</li>
                         <li>Total images: {totalImages}</li>
+                        <li>Model: {selectedModel.name} ({selectedModel.costTier})</li>
                         <li className="text-green-400">
-                          Est. cost: ~${(activeCount * 0.04).toFixed(2)}
+                          Est. cost: ~${totalCost.toFixed(2)} - ${estCostWithRetries.toFixed(2)}
                         </li>
                       </ul>
                     );

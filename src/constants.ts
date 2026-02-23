@@ -17,23 +17,46 @@ export const MODELS = {
   IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1
 } as const;
 
-export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; description: string }[] = [
+export const IMAGE_MODEL_OPTIONS: {
+  id: ImageGenerationModel;
+  name: string;
+  description: string;
+  costTier: string;
+  speedTier: string;
+  qualityTier: string;
+  costPerImage: number;
+}[] = [
   {
     id: 'nano-banana',
     name: 'Nano Banana',
-    description: 'Gemini 2.5 Flash Image - Fast generation, lower cost',
+    description: 'Gemini 2.5 Flash Image',
+    costTier: '$',
+    speedTier: 'Fast',
+    qualityTier: 'Good',
+    costPerImage: 0.01,
   },
   {
     id: 'nano-banana-pro',
     name: 'Nano Banana Pro',
-    description: 'Gemini 3 Pro Image - Highest quality, reasoning-enhanced',
+    description: 'Gemini 3 Pro Image',
+    costTier: '$$',
+    speedTier: 'Medium',
+    qualityTier: 'Best',
+    costPerImage: 0.02,
   },
   {
     id: 'gpt-image',
     name: 'GPT Image',
-    description: 'OpenAI GPT Image 1 - Reference-aware, high fidelity',
+    description: 'OpenAI GPT Image 1',
+    costTier: '$$$$$',
+    speedTier: 'Slow',
+    qualityTier: 'Great',
+    costPerImage: 0.05,
   },
 ];
+
+// Base cost per product for analysis + prompt refinement (Gemini Flash)
+export const MODEL_BASE_COST_PER_PRODUCT = 0.003;
 
 export const IMAGE_RESOLUTION_OPTIONS: { id: ImageResolution; name: string; size: string; description: string }[] = [
   {
