@@ -115,63 +115,61 @@ export const testSupabaseConnection = async (): Promise<{
     return { connected: false, bucketOk: false, bucketPolicyOk: false, tableOk: false, error: 'No Supabase credentials configured' };
   }
 
+  const results = { connected: false, bucketOk: false, bucketPolicyOk: false, tableOk: false, error: undefined as string | undefined };
+
   try {
-    // Test bucket by trying to list files (works with anon key + proper policies)
-    const { error: listError } = await client.storage
+    // Step 1: Test upload (most definitive test - proves bucket exists AND policies work)
+    // Use unique path + no upsert to only need INSERT policy (upsert needs INSERT+SELECT+UPDATE)
+    const testPath = `_connection_test_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`;
+    const testBlob = new Blob(['ok'], { type: 'text/plain' });
+    const { error: uploadError } = await client.storage
       .from('generated-images')
-      .list('_test', { limit: 1 });
+      .upload(testPath, testBlob);
 
-    // "Bucket not found" means the bucket doesn't exist
-    // Other errors (like policy violations) mean the bucket exists but policies are missing
-    const bucketNotFound = listError?.message?.toLowerCase().includes('bucket not found')
-      || listError?.message?.toLowerCase().includes('not found');
-    const bucketOk = !bucketNotFound;
-    const bucketPolicyOk = !listError;
-
-    // Test upload policy by uploading and deleting a tiny test file
-    let uploadPolicyOk = false;
-    if (bucketOk) {
-      const testPath = `_test/connection-test-${Date.now()}.txt`;
-      const testBlob = new Blob(['test'], { type: 'text/plain' });
-      const { error: uploadError } = await client.storage
-        .from('generated-images')
-        .upload(testPath, testBlob, { upsert: true });
-
-      if (!uploadError) {
-        uploadPolicyOk = true;
-        // Clean up test file
-        await client.storage.from('generated-images').remove([testPath]);
+    if (!uploadError) {
+      results.connected = true;
+      results.bucketOk = true;
+      results.bucketPolicyOk = true;
+      // Clean up
+      await client.storage.from('generated-images').remove([testPath]);
+    } else {
+      results.connected = true;
+      const msg = uploadError.message?.toLowerCase() || '';
+      // Only "Bucket not found" means the bucket itself is missing
+      if (msg.includes('bucket not found')) {
+        results.bucketOk = false;
+        results.error = 'Storage bucket "generated-images" not found. Create it in Supabase Dashboard > Storage.';
+      } else {
+        // Bucket exists but upload failed (policy issue)
+        results.bucketOk = true;
+        results.bucketPolicyOk = false;
+        results.error = `Storage upload failed: ${uploadError.message}. Check storage policies (see instructions below).`;
       }
     }
 
-    // Test table access
+    // Step 2: Test table access
     const { error: tableError } = await client.from('jobs').select('id').limit(1);
-    const tableOk = !tableError;
-
-    // Build error message
-    let error: string | undefined;
-    if (!bucketOk) {
-      error = 'Storage bucket "generated-images" not found. Create it in Supabase Dashboard > Storage.';
-    } else if (!uploadPolicyOk) {
-      error = 'Storage policies missing on "generated-images" bucket. Add policies to allow uploads (see instructions below).';
-    } else if (!tableOk) {
-      error = 'Table "jobs" not found. Run the setup SQL in Supabase Dashboard > SQL Editor.';
+    if (!tableError) {
+      results.tableOk = true;
+    } else {
+      const msg = tableError.message?.toLowerCase() || '';
+      if (!results.error) {
+        if (msg.includes('does not exist') || msg.includes('relation') || tableError.code === '42P01') {
+          results.error = 'Table "jobs" not found. Run the setup SQL in Supabase Dashboard > SQL Editor.';
+        } else {
+          results.error = `Table access failed: ${tableError.message}. Check RLS policies on the jobs table.`;
+        }
+      }
     }
 
-    return {
-      connected: true,
-      bucketOk,
-      bucketPolicyOk: bucketPolicyOk && uploadPolicyOk,
-      tableOk,
-      error,
-    };
+    return results;
   } catch (err) {
     return {
       connected: false,
       bucketOk: false,
       bucketPolicyOk: false,
       tableOk: false,
-      error: err instanceof Error ? err.message : 'Connection failed',
+      error: `Connection failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 };

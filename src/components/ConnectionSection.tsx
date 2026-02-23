@@ -214,7 +214,7 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
                 )}
               </div>
             </div>
-            {supabaseStatus === 'error' && supabaseMessage.includes('bucket') && !supabaseMessage.includes('polic') && (
+            {supabaseStatus === 'error' && supabaseMessage.includes('not found') && supabaseMessage.includes('bucket') && (
               <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
                 <p className="font-medium mb-1">Create the storage bucket:</p>
                 <ol className="list-decimal list-inside space-y-1 text-gray-400">
@@ -227,26 +227,37 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
                 <p className="mt-2 text-gray-400">Then add storage policies (see below).</p>
               </div>
             )}
-            {supabaseStatus === 'error' && supabaseMessage.includes('polic') && (
+            {supabaseStatus === 'error' && (supabaseMessage.includes('polic') || supabaseMessage.includes('upload failed') || supabaseMessage.includes('security')) && (
               <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
                 <p className="font-medium mb-1">Add storage policies:</p>
                 <p className="text-gray-400 mb-2">
                   Your bucket exists but has no access policies. Run this SQL in{' '}
                   <strong>Supabase Dashboard &gt; SQL Editor</strong>:
                 </p>
-                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`-- Allow public read access
+                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`-- First, drop any existing policies that may be misconfigured
+DROP POLICY IF EXISTS "Public read access" ON storage.objects;
+DROP POLICY IF EXISTS "Allow uploads" ON storage.objects;
+DROP POLICY IF EXISTS "Allow deletes" ON storage.objects;
+DROP POLICY IF EXISTS "Allow updates" ON storage.objects;
+
+-- Allow public read access (SELECT)
 CREATE POLICY "Public read access"
-  ON storage.objects FOR SELECT
+  ON storage.objects FOR SELECT TO anon
   USING (bucket_id = 'generated-images');
 
--- Allow anonymous uploads
+-- Allow anonymous uploads (INSERT)
 CREATE POLICY "Allow uploads"
-  ON storage.objects FOR INSERT
+  ON storage.objects FOR INSERT TO anon
   WITH CHECK (bucket_id = 'generated-images');
 
--- Allow anonymous deletes (for cleanup)
+-- Allow anonymous updates (needed for upsert)
+CREATE POLICY "Allow updates"
+  ON storage.objects FOR UPDATE TO anon
+  USING (bucket_id = 'generated-images');
+
+-- Allow anonymous deletes (cleanup)
 CREATE POLICY "Allow deletes"
-  ON storage.objects FOR DELETE
+  ON storage.objects FOR DELETE TO anon
   USING (bucket_id = 'generated-images');`}</pre>
                 <p className="mt-2 text-gray-400">After running the SQL, click &quot;Test Connection&quot; again.</p>
               </div>
