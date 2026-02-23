@@ -101,42 +101,75 @@ export const clearSupabaseConfig = (): void => {
 
 /**
  * Test Supabase connection and verify bucket/table exist.
- * Returns a diagnostic result.
+ * Uses anon-key-compatible methods (not admin APIs).
  */
 export const testSupabaseConnection = async (): Promise<{
   connected: boolean;
   bucketOk: boolean;
+  bucketPolicyOk: boolean;
   tableOk: boolean;
   error?: string;
 }> => {
   const client = getSupabaseClient();
   if (!client) {
-    return { connected: false, bucketOk: false, tableOk: false, error: 'No Supabase credentials configured' };
+    return { connected: false, bucketOk: false, bucketPolicyOk: false, tableOk: false, error: 'No Supabase credentials configured' };
   }
 
   try {
-    // Test basic connection by listing buckets
-    const { error: bucketError } = await client.storage.getBucket('generated-images');
-    const bucketOk = !bucketError;
+    // Test bucket by trying to list files (works with anon key + proper policies)
+    const { error: listError } = await client.storage
+      .from('generated-images')
+      .list('_test', { limit: 1 });
+
+    // "Bucket not found" means the bucket doesn't exist
+    // Other errors (like policy violations) mean the bucket exists but policies are missing
+    const bucketNotFound = listError?.message?.toLowerCase().includes('bucket not found')
+      || listError?.message?.toLowerCase().includes('not found');
+    const bucketOk = !bucketNotFound;
+    const bucketPolicyOk = !listError;
+
+    // Test upload policy by uploading and deleting a tiny test file
+    let uploadPolicyOk = false;
+    if (bucketOk) {
+      const testPath = `_test/connection-test-${Date.now()}.txt`;
+      const testBlob = new Blob(['test'], { type: 'text/plain' });
+      const { error: uploadError } = await client.storage
+        .from('generated-images')
+        .upload(testPath, testBlob, { upsert: true });
+
+      if (!uploadError) {
+        uploadPolicyOk = true;
+        // Clean up test file
+        await client.storage.from('generated-images').remove([testPath]);
+      }
+    }
 
     // Test table access
     const { error: tableError } = await client.from('jobs').select('id').limit(1);
     const tableOk = !tableError;
 
+    // Build error message
+    let error: string | undefined;
+    if (!bucketOk) {
+      error = 'Storage bucket "generated-images" not found. Create it in Supabase Dashboard > Storage.';
+    } else if (!uploadPolicyOk) {
+      error = 'Storage policies missing on "generated-images" bucket. Add policies to allow uploads (see instructions below).';
+    } else if (!tableOk) {
+      error = 'Table "jobs" not found. Run the setup SQL in Supabase Dashboard > SQL Editor.';
+    }
+
     return {
       connected: true,
       bucketOk,
+      bucketPolicyOk: bucketPolicyOk && uploadPolicyOk,
       tableOk,
-      error: !bucketOk
-        ? 'Storage bucket "generated-images" not found. Create it in Supabase Dashboard > Storage.'
-        : !tableOk
-        ? 'Table "jobs" not found. Run the setup SQL in Supabase Dashboard > SQL Editor.'
-        : undefined,
+      error,
     };
   } catch (err) {
     return {
       connected: false,
       bucketOk: false,
+      bucketPolicyOk: false,
       tableOk: false,
       error: err instanceof Error ? err.message : 'Connection failed',
     };

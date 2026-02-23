@@ -66,12 +66,12 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
 
     const result = await testSupabaseConnection();
 
-    if (result.connected && result.bucketOk && result.tableOk) {
+    if (result.connected && result.bucketOk && result.bucketPolicyOk && result.tableOk) {
       setSupabaseStatus('success');
-      setSupabaseMessage('Connected! Bucket and table verified.');
+      setSupabaseMessage('Connected! Bucket, policies, and table verified.');
     } else if (result.connected) {
       setSupabaseStatus('error');
-      setSupabaseMessage(result.error || 'Bucket or table missing');
+      setSupabaseMessage(result.error || 'Setup incomplete');
     } else {
       setSupabaseStatus('error');
       setSupabaseMessage(result.error || 'Connection failed');
@@ -214,20 +214,49 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
                 )}
               </div>
             </div>
-            {supabaseStatus === 'error' && supabaseMessage.includes('bucket') && (
+            {supabaseStatus === 'error' && supabaseMessage.includes('bucket') && !supabaseMessage.includes('polic') && (
               <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
-                <p className="font-medium mb-1">Setup Instructions:</p>
+                <p className="font-medium mb-1">Create the storage bucket:</p>
                 <ol className="list-decimal list-inside space-y-1 text-gray-400">
                   <li>Go to Supabase Dashboard &gt; Storage</li>
-                  <li>Create bucket named <code className="text-blue-400">generated-images</code></li>
-                  <li>Set bucket to <strong>Public</strong></li>
-                  <li>Add a Storage policy: allow all operations for anon role</li>
+                  <li>Click &quot;New bucket&quot;</li>
+                  <li>Name it <code className="text-blue-400">generated-images</code></li>
+                  <li>Toggle <strong>Public bucket</strong> ON</li>
+                  <li>Click &quot;Create bucket&quot;</li>
                 </ol>
+                <p className="mt-2 text-gray-400">Then add storage policies (see below).</p>
+              </div>
+            )}
+            {supabaseStatus === 'error' && supabaseMessage.includes('polic') && (
+              <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
+                <p className="font-medium mb-1">Add storage policies:</p>
+                <p className="text-gray-400 mb-2">
+                  Your bucket exists but has no access policies. Run this SQL in{' '}
+                  <strong>Supabase Dashboard &gt; SQL Editor</strong>:
+                </p>
+                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`-- Allow public read access
+CREATE POLICY "Public read access"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'generated-images');
+
+-- Allow anonymous uploads
+CREATE POLICY "Allow uploads"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'generated-images');
+
+-- Allow anonymous deletes (for cleanup)
+CREATE POLICY "Allow deletes"
+  ON storage.objects FOR DELETE
+  USING (bucket_id = 'generated-images');`}</pre>
+                <p className="mt-2 text-gray-400">After running the SQL, click &quot;Test Connection&quot; again.</p>
               </div>
             )}
             {supabaseStatus === 'error' && supabaseMessage.includes('table') && (
               <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
-                <p className="font-medium mb-1">Run this SQL in Supabase SQL Editor:</p>
+                <p className="font-medium mb-1">Create the jobs table:</p>
+                <p className="text-gray-400 mb-2">
+                  Run this SQL in <strong>Supabase Dashboard &gt; SQL Editor</strong>:
+                </p>
                 <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`CREATE TABLE jobs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -238,7 +267,13 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
   product_states JSONB,
   error TEXT,
   store_url TEXT
-);`}</pre>
+);
+
+-- Allow anonymous access (needed for browser client)
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all access"
+  ON jobs FOR ALL
+  USING (true) WITH CHECK (true);`}</pre>
               </div>
             )}
           </div>
