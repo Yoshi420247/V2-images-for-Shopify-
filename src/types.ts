@@ -108,6 +108,7 @@ export interface GenerationSettings {
   imageResolution?: ImageResolution;
   maxAutoRetries?: number;
   skipMinImages?: number;
+  autoUploadApproved?: boolean;
 }
 
 // ============================================

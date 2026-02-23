@@ -19,5 +19,6 @@ export {
   loadSupabaseConfig,
   clearSupabaseConfig,
   testSupabaseConnection,
+  deleteProductImagesFromStorage,
 } from './supabaseService';
 export * from './collectionImageService';

@@ -21,8 +21,8 @@ import {
   deleteImage,
   deleteAllProductImages,
 } from '../services/shopifyService';
-import { persistGeneratedImage } from '../services/supabaseService';
-import { saveImageToStore, loadImageFromStore, imageKey } from '../services/imageStore';
+import { persistGeneratedImage, deleteProductImagesFromStorage } from '../services/supabaseService';
+import { saveImageToStore, loadImageFromStore, imageKey, deleteImageFromStore } from '../services/imageStore';
 import { STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
@@ -616,6 +616,9 @@ const JobDetails: React.FC<JobDetailsProps> = ({
       // Step 3: Generate images (using pre-refined prompts when available)
       onUpdateJob((j) => ({ ...j, status: 'generating_images' }));
 
+      // Track approved image IDs for auto-upload
+      const completedImageIds: string[] = [];
+
       for (let i = 0; i < shotIndices.length; i++) {
         if (shouldStopRef.current) return;
 
@@ -711,6 +714,11 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             return { ...s, generatedImages: images };
           });
 
+          // Track approved images for auto-upload
+          if (finalImage.isApproved) {
+            completedImageIds.push(finalImage.id);
+          }
+
           // Save to IndexedDB first (always available, no config needed)
           const storeKey = imageKey(job.id, productId, finalImage.id);
           await saveImageToStore(storeKey, finalImage.base64);
@@ -752,6 +760,53 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             };
             return { ...s, generatedImages: images };
           });
+        }
+      }
+
+      // Auto-upload approved images to Shopify and clean up storage
+      if (job.settings.autoUploadApproved && completedImageIds.length > 0) {
+        // Load approved images from IndexedDB (React state may be stale in this closure)
+        const toUpload: { id: string; data: string }[] = [];
+        for (const imgId of completedImageIds) {
+          const stored = await loadImageFromStore(imageKey(job.id, productId, imgId));
+          if (stored) toUpload.push({ id: imgId, data: stored });
+        }
+
+        if (toUpload.length > 0) {
+          setStatusMessage(`Uploading ${toUpload.length} images for ${product.title} to Shopify...`);
+
+          // Handle replace mode: delete existing Shopify images first
+          if (job.settings.uploadMode === 'replace') {
+            if (job.settings.preserveOriginalImage) {
+              const imagesToDelete = product.images.filter((img) => img.position !== 1);
+              for (const img of imagesToDelete) {
+                await deleteImage(productId, img.id, credentials);
+              }
+            } else {
+              await deleteAllProductImages(productId, credentials);
+            }
+          }
+
+          for (const { id: imgId, data: imgData } of toUpload) {
+            try {
+              await uploadImage(productId, imgData, credentials);
+              updateProductState(productId, (s) => ({
+                ...s,
+                generatedImages: s.generatedImages.map((i) =>
+                  i.id === imgId ? { ...i, status: 'uploaded' } : i
+                ),
+              }));
+            } catch {
+              // Individual upload failed - image stays for manual retry
+            }
+          }
+
+          // Clean up storage after uploads
+          setStatusMessage(`Cleaning up storage for ${product.title}...`);
+          await deleteProductImagesFromStorage(job.id, productId);
+          for (const { id: imgId } of toUpload) {
+            await deleteImageFromStore(imageKey(job.id, productId, imgId));
+          }
         }
       }
 

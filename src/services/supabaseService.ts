@@ -286,27 +286,56 @@ export const uploadImage = async (
 };
 
 /**
- * Delete images for a job
+ * Delete all images for a specific product from Supabase Storage
+ */
+export const deleteProductImagesFromStorage = async (
+  jobId: string,
+  productId: number
+): Promise<void> => {
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  try {
+    const folder = `${jobId}/${productId}`;
+    const { data: files } = await client.storage
+      .from('generated-images')
+      .list(folder);
+
+    if (files && files.length > 0) {
+      const filePaths = files.map((file) => `${folder}/${file.name}`);
+      await client.storage.from('generated-images').remove(filePaths);
+    }
+  } catch {
+    // Cleanup failed silently - non-fatal
+  }
+};
+
+/**
+ * Delete images for an entire job
  */
 export const deleteJobImages = async (jobId: string): Promise<void> => {
   const client = getSupabaseClient();
   if (!client) return;
 
   try {
-    // List all files in the job folder
-    const { data: files, error: listError } = await client.storage
+    // List product folders under the job
+    const { data: productFolders } = await client.storage
       .from('generated-images')
       .list(jobId);
 
-    if (listError || !files) {
-      return;
-    }
+    if (!productFolders) return;
 
-    // Recursively delete all files
-    const filePaths = files.map((file) => `${jobId}/${file.name}`);
+    // For each product folder, list and delete all files
+    for (const folder of productFolders) {
+      const folderPath = `${jobId}/${folder.name}`;
+      const { data: files } = await client.storage
+        .from('generated-images')
+        .list(folderPath);
 
-    if (filePaths.length > 0) {
-      await client.storage.from('generated-images').remove(filePaths);
+      if (files && files.length > 0) {
+        const filePaths = files.map((file) => `${folderPath}/${file.name}`);
+        await client.storage.from('generated-images').remove(filePaths);
+      }
     }
   } catch {
     // Image cleanup failed silently - non-fatal

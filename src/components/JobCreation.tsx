@@ -750,6 +750,35 @@ const JobCreation: React.FC<JobCreationProps> = ({
                   </label>
                 </div>
 
+                {/* Auto-Upload Approved */}
+                <div>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="autoUploadApproved"
+                      checked={settings.autoUploadApproved || false}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          autoUploadApproved: e.target.checked,
+                        }))
+                      }
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label
+                      htmlFor="autoUploadApproved"
+                      className="ml-2 text-sm text-gray-300"
+                    >
+                      Auto-upload approved images
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1 ml-6">
+                    {settings.autoUploadApproved
+                      ? 'QA-approved images will upload to Shopify automatically after each product finishes, then free up storage. Ideal for large batch jobs.'
+                      : 'Images stay local for manual review before uploading.'}
+                  </p>
+                </div>
+
                 {/* Summary */}
                 <div className="pt-4 border-t border-gray-700">
                   <h3 className="text-sm font-medium text-gray-300 mb-2">Summary</h3>
@@ -782,6 +811,11 @@ const JobCreation: React.FC<JobCreationProps> = ({
                         <li className="text-green-400">
                           Est. cost: ~${totalCost.toFixed(2)} - ${estCostWithRetries.toFixed(2)}
                         </li>
+                        {settings.autoUploadApproved && (
+                          <li className="text-blue-400">
+                            Auto-upload: ON (storage freed per product)
+                          </li>
+                        )}
                       </ul>
                     );
                   })()}

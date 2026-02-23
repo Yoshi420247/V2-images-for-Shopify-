@@ -413,6 +413,7 @@ export const DEFAULT_GENERATION_SETTINGS = {
   parallelProducts: 1,
   maxAutoRetries: 1,
   skipMinImages: 0,
+  autoUploadApproved: false,
 };
 
 // ============================================
