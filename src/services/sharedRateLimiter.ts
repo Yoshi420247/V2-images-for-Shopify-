@@ -86,15 +86,15 @@ class SharedGeminiRateLimiter {
   }
 
   /**
-   * Acquire a slot in the rate limiter queue
-   * Higher priority values are processed first
+   * Acquire a slot in the rate limiter queue.
+   * Higher priority values are processed first.
    *
    * Priority levels:
    * - 10: Image generation (highest)
+   * - 5: QA checks (blocks pipeline, must complete before regen)
    * - 3: Prompt reimagination
    * - 2: Prompt refinement
-   * - 1: Product analysis
-   * - 0: QA checks (lowest)
+   * - 1: Product analysis (lowest)
    */
   async acquire(priority: number = 0): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -316,10 +316,12 @@ export const getRateLimiter = (): SharedGeminiRateLimiter => {
 export { SharedGeminiRateLimiter };
 
 // Priority constants for convenience
+// QA checks run after generation and block the pipeline (regen waits on QA),
+// so they need priority above prompt work but below active generation.
 export const PRIORITY = {
   IMAGE_GENERATION: 10,
+  QA_CHECK: 5,
   PROMPT_REIMAGINATION: 3,
   PROMPT_REFINEMENT: 2,
   PRODUCT_ANALYSIS: 1,
-  QA_CHECK: 0,
 } as const;

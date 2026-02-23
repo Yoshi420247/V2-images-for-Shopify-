@@ -18,6 +18,7 @@ import {
 import {
   fetchProductImagesAsBase64,
   uploadImage,
+  deleteImage,
   deleteAllProductImages,
 } from '../services/shopifyService';
 import { persistGeneratedImage } from '../services/supabaseService';
@@ -591,10 +592,21 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     for (const [productIdStr, items] of Object.entries(imagesByProduct)) {
       const productId = Number(productIdStr);
 
-      // Delete existing images if replace mode (first product only)
-      if (job.settings.uploadMode === 'replace' && !job.settings.preserveOriginalImage) {
+      // In replace mode, delete existing images before uploading new ones
+      if (job.settings.uploadMode === 'replace') {
         setStatusMessage('Removing existing images...');
-        await deleteAllProductImages(productId, credentials);
+        if (job.settings.preserveOriginalImage) {
+          // Keep position-1 image (the original), delete the rest
+          const product = products.find((p) => p.id === productId);
+          if (product) {
+            const imagesToDelete = product.images.filter((img) => img.position !== 1);
+            for (const img of imagesToDelete) {
+              await deleteImage(productId, img.id, credentials);
+            }
+          }
+        } else {
+          await deleteAllProductImages(productId, credentials);
+        }
       }
 
       for (const item of items) {
@@ -666,7 +678,10 @@ const JobDetails: React.FC<JobDetailsProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+    // navigateImage depends on viewingImage and filteredImagesForViewer,
+    // both listed here — exhaustive by value
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingImage, filteredImagesForViewer]);
 
   const canStart = ['queued', 'stopped', 'failed'].includes(job.status);
   const canStop = ['analyzing_products', 'generating_images'].includes(job.status);

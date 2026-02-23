@@ -12,7 +12,7 @@ export const MODELS = {
   TEXT_MODEL: 'gpt-4o',
   IMAGE_GENERATION_PRO: 'gemini-3-pro-image-preview', // Nano Banana Pro - Gemini 3 Pro (highest quality, reasoning-enhanced)
   IMAGE_GENERATION_FAST: 'gemini-2.5-flash-image', // Nano Banana - Gemini 2.5 Flash (fast generation)
-  IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1.5
+  IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1
 } as const;
 
 export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; description: string }[] = [
@@ -28,8 +28,8 @@ export const IMAGE_MODEL_OPTIONS: { id: ImageGenerationModel; name: string; desc
   },
   {
     id: 'gpt-image',
-    name: 'GPT Image 1.5',
-    description: 'OpenAI GPT Image - Alternative provider',
+    name: 'GPT Image',
+    description: 'OpenAI GPT Image 1 - Reference-aware, high fidelity',
   },
 ];
 
