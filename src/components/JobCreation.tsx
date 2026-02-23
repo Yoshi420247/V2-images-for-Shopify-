@@ -602,6 +602,64 @@ const JobCreation: React.FC<JobCreationProps> = ({
                   )}
                 </div>
 
+                {/* Skip Products with Enough Images */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Skip products with {settings.skipMinImages || 0} or more images
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={12}
+                    value={settings.skipMinImages || 0}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        skipMinImages: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>0 (off)</span>
+                    <span>12</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {settings.skipMinImages
+                      ? `Products with ${settings.skipMinImages}+ existing Shopify images will be skipped`
+                      : 'Process all selected products regardless of existing images'}
+                  </p>
+                </div>
+
+                {/* Max Auto Retries */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Max auto-retries on QA fail: {settings.maxAutoRetries ?? 1}
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={3}
+                    value={settings.maxAutoRetries ?? 1}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        maxAutoRetries: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>0 (none)</span>
+                    <span>3</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {(settings.maxAutoRetries ?? 1) === 0
+                      ? 'No auto-retries. Failed images can be manually regenerated.'
+                      : `Each failed image will auto-retry up to ${settings.maxAutoRetries ?? 1} time(s) before stopping`}
+                  </p>
+                </div>
+
                 {/* Preserve Original */}
                 <div className="flex items-center">
                   <input
@@ -627,13 +685,32 @@ const JobCreation: React.FC<JobCreationProps> = ({
                 {/* Summary */}
                 <div className="pt-4 border-t border-gray-700">
                   <h3 className="text-sm font-medium text-gray-300 mb-2">Summary</h3>
-                  <ul className="text-sm text-gray-400 space-y-1">
-                    <li>Products: {selectedProductIds.size}</li>
-                    <li>Images per product: {settings.numToGenerate}</li>
-                    <li>
-                      Total images: {selectedProductIds.size * settings.numToGenerate}
-                    </li>
-                  </ul>
+                  {(() => {
+                    const skipThreshold = settings.skipMinImages || 0;
+                    const selectedProducts = products.filter((p) => selectedProductIds.has(p.id));
+                    const skippedCount = skipThreshold > 0
+                      ? selectedProducts.filter((p) => (p.images?.length || 0) >= skipThreshold).length
+                      : 0;
+                    const activeCount = selectedProductIds.size - skippedCount;
+                    const totalImages = activeCount * settings.numToGenerate;
+
+                    return (
+                      <ul className="text-sm text-gray-400 space-y-1">
+                        <li>Products selected: {selectedProductIds.size}</li>
+                        {skippedCount > 0 && (
+                          <li className="text-yellow-400">
+                            Will skip: {skippedCount} (have {skipThreshold}+ images)
+                          </li>
+                        )}
+                        <li>Products to process: {activeCount}</li>
+                        <li>Images per product: {settings.numToGenerate}</li>
+                        <li>Total images: {totalImages}</li>
+                        <li className="text-green-400">
+                          Est. cost: ~${(activeCount * 0.04).toFixed(2)}
+                        </li>
+                      </ul>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

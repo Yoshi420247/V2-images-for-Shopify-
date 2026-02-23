@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import {
   ProductAnalysis,
   BackgroundOption,
@@ -7,15 +6,14 @@ import {
   ImageGenerationModel,
   ImageResolution,
 } from '../types';
-import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
+import { getGeminiImageRateLimiter, getGeminiTextRateLimiter, getOpenAIRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT, SHOT_BRIEFS } from '../constants';
 import {
   getGeminiClient,
   getOpenAIClient,
-  extractAndParseJson,
-  extractChatContent,
+  extractAndParseGeminiJson,
+  extractGeminiText,
   extractGeminiImage,
-  toDataUrl,
   stripDataUrlPrefix,
 } from './apiClients';
 
@@ -55,7 +53,7 @@ const handleGeminiError = (error: unknown): Error => {
 
     if (message.includes('api key') || message.includes('authentication')) {
       return new Error(
-        'Invalid API key. Please check your GEMINI_API_KEY configuration.'
+        'Invalid API key. Please check your API key configuration.'
       );
     }
 
@@ -64,11 +62,8 @@ const handleGeminiError = (error: unknown): Error => {
       message.includes('rate limit') ||
       message.includes('resource_exhausted')
     ) {
-      const rateLimiter = getRateLimiter();
-      rateLimiter.handleRateLimitError();
       return new Error(
-        `Rate limit exceeded. Current tier: ${rateLimiter.getConfig().tier}. ` +
-          'Consider upgrading to paid tier for higher limits.'
+        'Rate limit exceeded. The system will automatically retry. Consider upgrading to paid tier for higher limits.'
       );
     }
 
@@ -85,38 +80,49 @@ const handleGeminiError = (error: unknown): Error => {
 };
 
 // ============================================
-// Product Analysis
+// Helper: Prepare Gemini image parts
+// ============================================
+
+const toGeminiImageParts = (base64s: string[]) =>
+  base64s.map((base64) => ({
+    inlineData: {
+      mimeType: 'image/jpeg' as const,
+      data: stripDataUrlPrefix(base64),
+    },
+  }));
+
+// ============================================
+// Product Analysis (Gemini Flash)
 // ============================================
 
 /**
- * Analyze a product using GPT-4o vision capabilities
+ * Analyze a product using Gemini Flash vision capabilities
  * Returns description, estimated size, and use cases
  */
 export const analyzeProduct = async (
   productTitle: string,
   sourceImageBase64s: string[]
 ): Promise<ProductAnalysis> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getGeminiTextRateLimiter();
 
   return rateLimiter.execute(
     async () => {
-      const openai = getOpenAIClient();
+      const genai = getGeminiClient();
+      const imageParts = toGeminiImageParts(sourceImageBase64s);
 
-      // Prepare image messages
-      const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] =
-        sourceImageBase64s.map((base64) => ({
-          type: 'image_url' as const,
-          image_url: { url: toDataUrl(base64) },
-        }));
-
-      const response = await openai.chat.completions.create({
-        model: MODELS.TEXT_MODEL,
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-        messages: [
+      const response = await genai.models.generateContent({
+        model: MODELS.QA_MODEL,
+        contents: [
           {
-            role: 'system',
-            content: `You are an expert product analyst. Analyze the product images and provide detailed information.
+            role: 'user',
+            parts: [
+              ...imageParts,
+              {
+                text: `You are an expert product analyst. Analyze the product images and provide detailed information.
+
+Product name: "${productTitle}"
+
+Provide a detailed analysis including description, estimated physical size, and common use cases.
 
 Return a JSON object with the following structure:
 {
@@ -126,28 +132,24 @@ Return a JSON object with the following structure:
 }
 
 Be specific and accurate. Focus on what you can actually see in the images.`,
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Analyze this product: "${productTitle}". Provide a detailed analysis including description, estimated physical size, and common use cases.`,
               },
-              ...imageMessages,
             ],
           },
         ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.3,
+        },
       });
 
-      return extractAndParseJson<ProductAnalysis>(response, 'product analysis');
+      return extractAndParseGeminiJson<ProductAnalysis>(response, 'product analysis');
     },
     PRIORITY.PRODUCT_ANALYSIS
   );
 };
 
 // ============================================
-// Prompt Refinement
+// Prompt Refinement (Gemini Flash)
 // ============================================
 
 /**
@@ -171,42 +173,23 @@ const getBackgroundInstruction = (option: BackgroundOption): string => {
 };
 
 /**
- * Refine generic shot briefs into product-specific prompts using GPT-4o
+ * Build the shot briefs text for prompt refinement
  */
-export const refinePrompts = async (
-  productTitle: string,
-  analysis: ProductAnalysis,
-  shotIndices: number[],
-  backgroundOption: BackgroundOption,
-  brandGuidelines?: string
-): Promise<string[]> => {
-  const rateLimiter = getRateLimiter();
+const buildShotBriefsText = (shotIndices: number[]): string => {
+  return shotIndices
+    .map((index) => {
+      const brief = SHOT_BRIEFS.find((b) => b.index === index) || SHOT_BRIEFS[0];
+      return `### SHOT ${brief.index} - ${brief.type.toUpperCase()}
+${brief.description}
+Cannabis allowed: ${brief.allowsCannabis}, Smoke allowed: ${brief.allowsSmoke}`;
+    })
+    .join('\n\n');
+};
 
-  return rateLimiter.execute(
-    async () => {
-      const openai = getOpenAIClient();
-
-      const selectedBriefs = shotIndices.map((index) => {
-        const brief = SHOT_BRIEFS.find((b) => b.index === index) || SHOT_BRIEFS[0];
-        return {
-          index: brief.index,
-          type: brief.type,
-          baseDescription: brief.description,
-          allowsCannabis: brief.allowsCannabis,
-          allowsSmoke: brief.allowsSmoke,
-        };
-      });
-
-      const backgroundInstruction = getBackgroundInstruction(backgroundOption);
-
-      const response = await openai.chat.completions.create({
-        model: MODELS.TEXT_MODEL,
-        temperature: 0.5,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert commercial product photography director creating precise image generation prompts.
+/**
+ * The prompt refinement system instruction (shared between standalone and combined calls)
+ */
+const REFINEMENT_INSTRUCTIONS = `You are an expert commercial product photography director creating precise image generation prompts.
 
 Your prompts must be HIGHLY SPECIFIC and TECHNICAL, like instructions to a professional photographer.
 
@@ -229,14 +212,37 @@ Always end prompts with: "Sharp focus, no blur artifacts, no distortion, anatomi
 - Shots 1-7: Product ONLY. Zero cannabis, smoke, or lifestyle elements.
 - Shots 8-10: May include lifestyle elements if allowed.
 - Hands: ONLY "elegant feminine hand with slender fingers, natural manicured nails, exactly 5 fingers"
-- Scale: Always reference "${analysis?.estimatedSize || 'accurate scale'}"
-- Never alter the product itself - exact match to reference required
+- Never alter the product itself - exact match to reference required`;
 
-Return JSON: { "prompts": ["detailed prompt 1", "detailed prompt 2", ...] }`,
-          },
+/**
+ * Refine generic shot briefs into product-specific prompts using Gemini Flash
+ */
+export const refinePrompts = async (
+  productTitle: string,
+  analysis: ProductAnalysis,
+  shotIndices: number[],
+  backgroundOption: BackgroundOption,
+  brandGuidelines?: string
+): Promise<string[]> => {
+  const rateLimiter = getGeminiTextRateLimiter();
+
+  return rateLimiter.execute(
+    async () => {
+      const genai = getGeminiClient();
+      const backgroundInstruction = getBackgroundInstruction(backgroundOption);
+
+      const response = await genai.models.generateContent({
+        model: MODELS.REASONING_MODEL,
+        contents: [
           {
             role: 'user',
-            content: `## PRODUCT DETAILS
+            parts: [
+              {
+                text: `${REFINEMENT_INSTRUCTIONS}
+
+- Scale: Always reference "${analysis?.estimatedSize || 'accurate scale'}"
+
+## PRODUCT DETAILS
 Name: "${productTitle}"
 Description: ${analysis.description}
 Physical Size: ${analysis.estimatedSize}
@@ -248,27 +254,115 @@ ${backgroundInstruction}
 ${brandGuidelines ? `## BRAND GUIDELINES\n${brandGuidelines}` : ''}
 
 ## SHOTS TO CREATE (Generate one detailed prompt per shot)
-${selectedBriefs
-  .map(
-    (b) =>
-      `
-### SHOT ${b.index} - ${b.type.toUpperCase()}
-${b.baseDescription}
-Cannabis allowed: ${b.allowsCannabis}, Smoke allowed: ${b.allowsSmoke}`
-  )
-  .join('\n')}
+${buildShotBriefsText(shotIndices)}
 
-Generate ${shotIndices.length} highly detailed prompts. Each prompt should be 100-200 words with specific technical photography instructions. Remember to include anti-artifact instructions at the end of each prompt.`,
+Generate ${shotIndices.length} highly detailed prompts. Each prompt should be 100-200 words with specific technical photography instructions. Remember to include anti-artifact instructions at the end of each prompt.
+
+Return JSON: { "prompts": ["detailed prompt 1", "detailed prompt 2", ...] }`,
+              },
+            ],
           },
         ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.5,
+        },
       });
 
-      const result = extractAndParseJson<{ prompts: string[] }>(response, 'prompt refinement');
+      const result = extractAndParseGeminiJson<{ prompts: string[] }>(response, 'prompt refinement');
       return result.prompts;
     },
     PRIORITY.PROMPT_REFINEMENT
   );
 };
+
+// ============================================
+// Combined Analysis + Prompt Refinement (Gemini Flash)
+// Saves 1 API call per product by doing both in one request
+// ============================================
+
+/**
+ * Analyze product AND refine prompts in a single Gemini Flash call.
+ * This replaces separate analyzeProduct() + refinePrompts() calls during initial generation.
+ */
+export const analyzeAndRefinePrompts = async (
+  productTitle: string,
+  sourceImageBase64s: string[],
+  shotIndices: number[],
+  backgroundOption: BackgroundOption,
+  brandGuidelines?: string
+): Promise<{ analysis: ProductAnalysis; prompts: string[] }> => {
+  const rateLimiter = getGeminiTextRateLimiter();
+
+  return rateLimiter.execute(
+    async () => {
+      const genai = getGeminiClient();
+      const imageParts = toGeminiImageParts(sourceImageBase64s);
+      const backgroundInstruction = getBackgroundInstruction(backgroundOption);
+
+      const response = await genai.models.generateContent({
+        model: MODELS.REASONING_MODEL,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              ...imageParts,
+              {
+                text: `You are an expert product analyst AND commercial photography director. Complete BOTH tasks below in a single response.
+
+## TASK 1: PRODUCT ANALYSIS
+Analyze the product images for "${productTitle}". Determine:
+- A detailed description of the product (features, materials, design)
+- Estimated physical dimensions
+- Common use cases
+
+## TASK 2: PHOTOGRAPHY PROMPT GENERATION
+
+${REFINEMENT_INSTRUCTIONS}
+
+Using your analysis from Task 1, create detailed photography prompts for these shots:
+
+## BACKGROUND PREFERENCE
+${backgroundInstruction}
+
+${brandGuidelines ? `## BRAND GUIDELINES\n${brandGuidelines}` : ''}
+
+## SHOTS TO CREATE
+${buildShotBriefsText(shotIndices)}
+
+Generate ${shotIndices.length} highly detailed prompts (100-200 words each) with specific technical photography instructions. Include anti-artifact instructions at the end of each prompt. Reference the product's actual size from your analysis.
+
+Return JSON:
+{
+  "analysis": {
+    "description": "detailed product description",
+    "estimatedSize": "physical dimensions",
+    "useCases": ["use case 1", "use case 2", "use case 3"]
+  },
+  "prompts": ["detailed prompt 1", "detailed prompt 2", ...]
+}`,
+              },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.4,
+        },
+      });
+
+      return extractAndParseGeminiJson<{ analysis: ProductAnalysis; prompts: string[] }>(
+        response,
+        'analysis and prompt refinement'
+      );
+    },
+    PRIORITY.PRODUCT_ANALYSIS
+  );
+};
+
+// ============================================
+// Smart Image Analysis (Gemini Flash)
+// ============================================
 
 /**
  * Smart analyze an image to determine what went wrong and suggest improvements
@@ -281,21 +375,37 @@ export const smartAnalyzeImage = async (
   originalPrompt: string,
   estimatedSize: string
 ): Promise<{ analysis: string; suggestedFixes: string[] }> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getGeminiTextRateLimiter();
 
   return rateLimiter.execute(
     async () => {
-      const openai = getOpenAIClient();
+      const genai = getGeminiClient();
 
-      const response = await openai.chat.completions.create({
-        model: MODELS.TEXT_MODEL,
-        temperature: 0.4,
-        response_format: { type: 'json_object' },
-        messages: [
+      const response = await genai.models.generateContent({
+        model: MODELS.QA_MODEL,
+        contents: [
           {
-            role: 'system',
-            content: `You are an expert image quality analyst for e-commerce product photography.
-Your job is to compare a generated AI image against the original product photo and identify specific issues that need to be fixed.
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: stripDataUrlPrefix(generatedImageBase64),
+                },
+              },
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: stripDataUrlPrefix(sourceImageBase64),
+                },
+              },
+              {
+                text: `You are an expert image quality analyst for e-commerce product photography.
+Compare the generated AI image (first) against the original product photo (second) and identify specific issues.
+
+Product: "${productTitle}"
+Expected Size: ${estimatedSize}
+Original Prompt: ${originalPrompt}
 
 Focus on:
 1. Product accuracy - does the generated product match the original exactly?
@@ -311,38 +421,25 @@ Return a JSON object:
 }
 
 Be specific and actionable in your suggestions.`,
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Product: "${productTitle}"
-Expected Size: ${estimatedSize}
-Original Prompt: ${originalPrompt}
-
-Compare these images and identify what went wrong with the AI-generated version.
-First image: Generated result
-Second image: Original product reference`,
-              },
-              {
-                type: 'image_url',
-                image_url: { url: toDataUrl(generatedImageBase64, 'image/png') },
-              },
-              {
-                type: 'image_url',
-                image_url: { url: toDataUrl(sourceImageBase64) },
               },
             ],
           },
         ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.4,
+        },
       });
 
-      return extractAndParseJson<{ analysis: string; suggestedFixes: string[] }>(response, 'smart analysis');
+      return extractAndParseGeminiJson<{ analysis: string; suggestedFixes: string[] }>(response, 'smart analysis');
     },
     PRIORITY.QA_CHECK
   );
 };
+
+// ============================================
+// Prompt Reimagination (Gemini Flash)
+// ============================================
 
 /**
  * Reimagine a prompt after QA failure with specific feedback
@@ -353,42 +450,46 @@ export const reimaginePrompt = async (
   productTitle: string,
   analysis: ProductAnalysis
 ): Promise<string> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getGeminiTextRateLimiter();
 
   return rateLimiter.execute(
     async () => {
-      const openai = getOpenAIClient();
+      const genai = getGeminiClient();
 
-      const response = await openai.chat.completions.create({
-        model: MODELS.TEXT_MODEL,
-        temperature: 0.8,
-        messages: [
+      const response = await genai.models.generateContent({
+        model: MODELS.REASONING_MODEL,
+        contents: [
           {
-            role: 'system',
-            content: `${AI_STYLIST_PROMPT}
+            role: 'user',
+            parts: [
+              {
+                text: `${AI_STYLIST_PROMPT}
 
 You are reimagining a prompt that failed quality checks. Create an improved version that addresses the feedback while maintaining the original intent.
 
 STRICT RULES remain the same:
 - No male characters, feminine hands only
 - Correct product usage and scale
-- Cannabis/smoke only in designated lifestyle shots`,
-          },
-          {
-            role: 'user',
-            content: `Product: "${productTitle}"
+- Cannabis/smoke only in designated lifestyle shots
+
+Product: "${productTitle}"
 Estimated Size: ${analysis.estimatedSize}
 
 Original Prompt: ${originalPrompt}
 
 QA Feedback / Issues: ${feedback}
 
-Create an improved prompt that addresses these issues while maintaining the original shot concept.`,
+Create an improved prompt that addresses these issues while maintaining the original shot concept. Return ONLY the new prompt text, nothing else.`,
+              },
+            ],
           },
         ],
+        config: {
+          temperature: 0.8,
+        },
       });
 
-      return extractChatContent(response, 'prompt reimagination').trim();
+      return extractGeminiText(response).trim();
     },
     PRIORITY.PROMPT_REIMAGINATION
   );
@@ -407,20 +508,13 @@ export const generateImageWithGemini = async (
   imageModel?: ImageGenerationModel,
   imageResolution?: ImageResolution
 ): Promise<string> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getGeminiImageRateLimiter();
 
   return rateLimiter.execute(
     async () => {
       const genai = getGeminiClient();
 
-      // Prepare image parts for Gemini
-      const imageParts = sourceImageBase64s.map((base64) => ({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: stripDataUrlPrefix(base64),
-        },
-      }));
-
+      const imageParts = toGeminiImageParts(sourceImageBase64s);
       const modelId = getGeminiModelId(imageModel);
       const resolution = getResolutionSize(imageResolution);
 
@@ -461,8 +555,6 @@ IMPORTANT:
 
 /**
  * Map our resolution setting to valid OpenAI image sizes.
- * gpt-image-1 supports: 1024x1024, 1024x1536, 1536x1024
- * (auto is also accepted and lets the model choose)
  */
 const getOpenAISize = (
   resolution?: ImageResolution
@@ -479,7 +571,6 @@ const getOpenAISize = (
 
 /**
  * Map our resolution setting to OpenAI quality parameter.
- * gpt-image-1 supports: low, medium, high, auto
  */
 const getOpenAIQuality = (
   resolution?: ImageResolution
@@ -497,15 +588,13 @@ const getOpenAIQuality = (
 
 /**
  * Generate an image using OpenAI GPT Image with reference images.
- * Uses the images.edit endpoint when source images are available
- * to ground the generation on actual product photos.
  */
 export const generateImageWithOpenAI = async (
   sourceImageBase64s: string[],
   prompt: string,
   imageResolution?: ImageResolution
 ): Promise<string> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getOpenAIRateLimiter();
 
   return rateLimiter.execute(
     async () => {
@@ -527,7 +616,6 @@ IMPORTANT:
 
       // If we have source images, use the edit endpoint for reference-grounded generation
       if (sourceImageBase64s.length > 0) {
-        // Convert base64 to File objects for the API
         const imageFiles: File[] = [];
         for (const base64 of sourceImageBase64s.slice(0, 1)) {
           const raw = stripDataUrlPrefix(base64);
@@ -588,11 +676,11 @@ IMPORTANT:
 };
 
 // ============================================
-// Quality Assurance
+// Quality Assurance (Gemini Flash)
 // ============================================
 
 /**
- * Perform quality check on generated image using GPT-4o vision
+ * Perform quality check on generated image using Gemini Flash vision
  */
 export const performQualityCheck = async (
   generatedImageBase64: string,
@@ -601,35 +689,39 @@ export const performQualityCheck = async (
   estimatedSize: string,
   sourceImageBase64?: string
 ): Promise<QAInfo> => {
-  const rateLimiter = getRateLimiter();
+  const rateLimiter = getGeminiTextRateLimiter();
 
   return rateLimiter.execute(
     async () => {
-      const openai = getOpenAIClient();
+      const genai = getGeminiClient();
 
-      const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+      const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [
         {
-          type: 'image_url' as const,
-          image_url: { url: toDataUrl(generatedImageBase64, 'image/png') },
+          inlineData: {
+            mimeType: 'image/png',
+            data: stripDataUrlPrefix(generatedImageBase64),
+          },
         },
       ];
 
-      // Add source image for comparison if available
       if (sourceImageBase64) {
-        imageMessages.push({
-          type: 'image_url' as const,
-          image_url: { url: toDataUrl(sourceImageBase64) },
+        imageParts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: stripDataUrlPrefix(sourceImageBase64),
+          },
         });
       }
 
-      const response = await openai.chat.completions.create({
-        model: MODELS.TEXT_MODEL,
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-        messages: [
+      const response = await genai.models.generateContent({
+        model: MODELS.QA_MODEL,
+        contents: [
           {
-            role: 'system',
-            content: `You are a quality assurance specialist for e-commerce product photography. Your job is to identify images that are NOT suitable for commercial use.
+            role: 'user',
+            parts: [
+              ...imageParts,
+              {
+                text: `You are a quality assurance specialist for e-commerce product photography. Your job is to identify images that are NOT suitable for commercial use.
 
 ## EVALUATION CRITERIA (in order of importance)
 
@@ -666,7 +758,11 @@ export const performQualityCheck = async (
 - Background color not exact match
 - Minor style differences if product is accurate
 
+Product: "${productTitle}"
 Expected product size for scale reference: ${estimatedSize}
+Shot Brief: ${prompt}
+
+${sourceImageBase64 ? 'First image is the generated result. Second image is the source product for comparison.' : 'Evaluate this generated product image.'}
 
 Be REASONABLE - reject obvious failures but accept commercially viable images. A good-enough image is better than constant regeneration.
 
@@ -674,27 +770,17 @@ Return JSON: {
   "isApproved": boolean,
   "reasoning": "Brief explanation (1-2 sentences) of decision"
 }`,
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Product: "${productTitle}"
-Expected Size: ${estimatedSize}
-Shot Brief: ${prompt}
-
-${sourceImageBase64 ? 'First image is the generated result. Second image is the source product for comparison.' : 'Evaluate this generated product image.'}
-
-Perform quality check and provide your assessment.`,
               },
-              ...imageMessages,
             ],
           },
         ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+        },
       });
 
-      return extractAndParseJson<QAInfo>(response, 'quality check');
+      return extractAndParseGeminiJson<QAInfo>(response, 'quality check');
     },
     PRIORITY.QA_CHECK
   );
@@ -706,7 +792,8 @@ Perform quality check and provide your assessment.`,
 
 /**
  * Main entry point for image generation
- * Handles the full pipeline: refinement → generation → QA
+ * Handles the full pipeline: refinement -> generation -> QA
+ * Accepts optional preRefinedPrompt to skip per-image refinement call
  */
 export const generateImage = async (
   sourceImageBase64s: string[],
@@ -719,13 +806,17 @@ export const generateImage = async (
   feedback?: string,
   previousPrompt?: string,
   imageModel?: ImageGenerationModel,
-  imageResolution?: ImageResolution
+  imageResolution?: ImageResolution,
+  preRefinedPrompt?: string
 ): Promise<GeminiGenerationResult> => {
   try {
     let prompt: string;
     let originalPrompt: string | undefined;
 
-    if (isRegeneration && previousPrompt && feedback) {
+    if (preRefinedPrompt) {
+      // Use pre-refined prompt from combined analyzeAndRefinePrompts() call
+      prompt = preRefinedPrompt;
+    } else if (isRegeneration && previousPrompt && feedback) {
       // Reimagine the prompt based on feedback
       prompt = await reimaginePrompt(previousPrompt, feedback, productTitle, analysis);
       originalPrompt = previousPrompt;

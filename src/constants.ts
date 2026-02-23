@@ -10,6 +10,8 @@ export const SHOPIFY_API_VERSION = '2024-07';
 
 export const MODELS = {
   TEXT_MODEL: 'gpt-4o',
+  REASONING_MODEL: 'gemini-2.5-flash', // Cheapest best reasoning model for text tasks
+  QA_MODEL: 'gemini-2.5-flash', // Fast vision model for QA checks and image review
   IMAGE_GENERATION_PRO: 'gemini-3-pro-image-preview', // Nano Banana Pro - Gemini 3 Pro (highest quality, reasoning-enhanced)
   IMAGE_GENERATION_FAST: 'gemini-2.5-flash-image', // Nano Banana - Gemini 2.5 Flash (fast generation)
   IMAGE_GENERATION_OPENAI: 'gpt-image-1', // OpenAI GPT Image 1
@@ -346,6 +348,36 @@ export const RATE_LIMITER_CONFIG: Record<'free' | 'paid' | 'tier2', RateLimiterC
   },
 };
 
+// Gemini Text/Vision API rate limits (much more generous than image generation)
+export const GEMINI_TEXT_RATE_LIMITER_CONFIG: Record<'free' | 'paid' | 'tier2', RateLimiterConfig> = {
+  free: {
+    maxConcurrent: 2,
+    minDelayBetweenRequests: 500,
+    maxRequestsPerMinute: 15,
+    rateLimitCooldown: 15000,
+  },
+  paid: {
+    maxConcurrent: 5,
+    minDelayBetweenRequests: 200,
+    maxRequestsPerMinute: 30,
+    rateLimitCooldown: 10000,
+  },
+  tier2: {
+    maxConcurrent: 10,
+    minDelayBetweenRequests: 100,
+    maxRequestsPerMinute: 60,
+    rateLimitCooldown: 5000,
+  },
+};
+
+// OpenAI API rate limits (only used when gpt-image model is selected)
+export const OPENAI_RATE_LIMITER_CONFIG: RateLimiterConfig = {
+  maxConcurrent: 1,
+  minDelayBetweenRequests: 5000,
+  maxRequestsPerMinute: 10,
+  rateLimitCooldown: 30000,
+};
+
 // ============================================
 // Generation Defaults
 // ============================================
@@ -356,6 +388,8 @@ export const DEFAULT_GENERATION_SETTINGS = {
   backgroundOption: { type: 'default' as const },
   preserveOriginalImage: true,
   parallelProducts: 1,
+  maxAutoRetries: 1,
+  skipMinImages: 0,
 };
 
 // ============================================
