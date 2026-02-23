@@ -155,32 +155,29 @@ export const fetchProduct = async (
  */
 export const uploadImage = async (
   productId: number,
-  imageBase64: string,
+  imageSource: string,
   creds: ShopifyCredentials,
   position?: number,
   alt?: string
 ): Promise<ShopifyImage> => {
-  // Remove data URL prefix if present
-  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  const isUrl = imageSource.startsWith('http://') || imageSource.startsWith('https://');
 
-  const payload: {
-    image: {
-      attachment: string;
-      position?: number;
-      alt?: string;
-    };
-  } = {
-    image: {
-      attachment: base64Data,
-    },
-  };
+  const imagePayload: Record<string, string | number> = {};
+
+  if (isUrl) {
+    // Shopify can fetch from a public URL directly via the src field
+    imagePayload.src = imageSource;
+  } else {
+    // Remove data URL prefix if present and send as base64 attachment
+    imagePayload.attachment = imageSource.replace(/^data:image\/\w+;base64,/, '');
+  }
 
   if (position !== undefined) {
-    payload.image.position = position;
+    imagePayload.position = position;
   }
 
   if (alt) {
-    payload.image.alt = alt;
+    imagePayload.alt = alt;
   }
 
   const { data } = await shopifyApiRequest<{ image: ShopifyImage }>(
@@ -188,7 +185,7 @@ export const uploadImage = async (
     creds,
     {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ image: imagePayload }),
     }
   );
 

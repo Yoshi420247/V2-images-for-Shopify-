@@ -928,11 +928,15 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             ),
           }));
 
-          let imageData = item.image.base64 || item.image.imageUrl;
+          // Prefer IndexedDB (actual base64) over Supabase URL
+          let imageData = item.image.base64;
           if (!imageData) {
-            // Load from IndexedDB if not in memory
             const stored = await loadImageFromStore(imageKey(job.id, productId, item.image.id));
             if (stored) imageData = stored;
+          }
+          // Fall back to Supabase URL (uploadImage handles URLs via Shopify src field)
+          if (!imageData && item.image.imageUrl) {
+            imageData = item.image.imageUrl;
           }
           if (!imageData) continue;
 
