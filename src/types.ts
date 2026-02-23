@@ -106,6 +106,8 @@ export interface GenerationSettings {
   brandGuidelines?: string;
   imageModel?: ImageGenerationModel;
   imageResolution?: ImageResolution;
+  maxAutoRetries?: number;
+  skipMinImages?: number;
 }
 
 // ============================================

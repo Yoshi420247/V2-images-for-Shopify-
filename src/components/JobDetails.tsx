@@ -10,7 +10,7 @@ import {
   ImageResolution,
 } from '../types';
 import {
-  analyzeProduct,
+  analyzeAndRefinePrompts,
   generateImage,
   getDefaultShotIndices,
   smartAnalyzeImage,
@@ -22,7 +22,7 @@ import {
   deleteAllProductImages,
 } from '../services/shopifyService';
 import { persistGeneratedImage } from '../services/supabaseService';
-import { QA_THRESHOLDS, STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
+import { STATUS_MESSAGES, IMAGE_MODEL_OPTIONS, IMAGE_RESOLUTION_OPTIONS } from '../constants';
 
 interface JobDetailsProps {
   job: GenerationJob;
@@ -351,6 +351,16 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     const productId = product.id;
     const state = job.productStates[productId];
 
+    // Smart skip: skip products that already have enough images
+    const skipThreshold = job.settings.skipMinImages || 0;
+    if (skipThreshold > 0 && product.images && product.images.length >= skipThreshold) {
+      setStatusMessage(`Skipping ${product.title} (already has ${product.images.length} images)`);
+      updateProductState(productId, (s) => ({ ...s, isGenerating: false }));
+      return;
+    }
+
+    const maxAutoRetries = job.settings.maxAutoRetries ?? 1;
+
     try {
       // Step 1: Fetch source images if not already cached
       let sourceImages = state.sourceImageBase64s;
@@ -367,12 +377,27 @@ const JobDetails: React.FC<JobDetailsProps> = ({
         throw new Error('No source images available');
       }
 
-      // Step 2: Analyze product if not already analyzed
+      const shotIndices = getDefaultShotIndices(job.settings.numToGenerate);
+
+      // Step 2: Combined analysis + prompt refinement in ONE API call
       let analysis = state.analysis;
+      let preRefinedPrompts: string[] | null = null;
+
       if (!analysis) {
-        setStatusMessage(`Analyzing ${product.title}...`);
+        setStatusMessage(`Analyzing & preparing prompts for ${product.title}...`);
         onUpdateJob((j) => ({ ...j, status: 'analyzing_products' }));
-        analysis = await analyzeProduct(product.title, sourceImages);
+
+        const combined = await analyzeAndRefinePrompts(
+          product.title,
+          sourceImages,
+          shotIndices,
+          job.settings.backgroundOption,
+          job.settings.brandGuidelines
+        );
+
+        analysis = combined.analysis;
+        preRefinedPrompts = combined.prompts;
+
         updateProductState(productId, (s) => ({
           ...s,
           analysis,
@@ -382,9 +407,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
 
       if (shouldStopRef.current) return;
 
-      // Step 3: Generate images
+      // Step 3: Generate images (using pre-refined prompts when available)
       onUpdateJob((j) => ({ ...j, status: 'generating_images' }));
-      const shotIndices = getDefaultShotIndices(job.settings.numToGenerate);
 
       for (let i = 0; i < shotIndices.length; i++) {
         if (shouldStopRef.current) return;
@@ -425,7 +449,8 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             undefined,
             undefined,
             imageModel,
-            imageResolution
+            imageResolution,
+            preRefinedPrompts?.[i]
           );
 
           const generatedImage: GeneratedImage = {
@@ -440,11 +465,11 @@ const JobDetails: React.FC<JobDetailsProps> = ({
             regenerationCount: existingImage?.regenerationCount || 0,
           };
 
-          // Auto-retry if QA failed and under threshold
+          // Auto-retry if QA failed and under configurable threshold
           let finalImage = generatedImage;
           if (
             !result.qaInfo?.isApproved &&
-            generatedImage.regenerationCount < QA_THRESHOLDS.MAX_AUTO_REGENERATIONS
+            generatedImage.regenerationCount < maxAutoRetries
           ) {
             setStatusMessage(`Auto-regenerating image ${i + 1} (QA failed)...`);
             const retryResult = await generateImage(

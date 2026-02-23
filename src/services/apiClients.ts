@@ -93,6 +93,38 @@ export const extractGeminiImage = (
 };
 
 /**
+ * Extract text content from a Gemini generation response.
+ * Throws a descriptive error if no text is found.
+ */
+export const extractGeminiText = (
+  response: Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>
+): string => {
+  const candidate = response.candidates?.[0];
+  if (!candidate?.content?.parts) {
+    throw new Error('No content in Gemini response');
+  }
+
+  for (const part of candidate.content.parts) {
+    if ('text' in part && part.text) {
+      return part.text;
+    }
+  }
+
+  throw new Error('No text content in Gemini response');
+};
+
+/**
+ * Extract text from a Gemini response and parse as JSON.
+ */
+export const extractAndParseGeminiJson = <T>(
+  response: Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>,
+  context: string
+): T => {
+  const text = extractGeminiText(response);
+  return parseJsonResponse<T>(text, context);
+};
+
+/**
  * Prepare a base64 string as a data URL, adding the prefix if missing.
  */
 export const toDataUrl = (

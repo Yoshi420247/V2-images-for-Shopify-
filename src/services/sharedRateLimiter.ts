@@ -1,5 +1,5 @@
 import { RateLimiterTier, RateLimiterConfig } from '../types';
-import { RATE_LIMITER_CONFIG } from '../constants';
+import { RATE_LIMITER_CONFIG, GEMINI_TEXT_RATE_LIMITER_CONFIG, OPENAI_RATE_LIMITER_CONFIG } from '../constants';
 
 interface QueuedRequest {
   resolve: () => void;
@@ -9,62 +9,37 @@ interface QueuedRequest {
 }
 
 /**
- * SharedGeminiRateLimiter - Singleton rate limiter for all AI API requests
+ * AIRateLimiter - Configurable rate limiter for AI API requests
  *
  * Implements a priority queue with tier-based configuration to manage
  * concurrent requests and prevent rate limiting from AI service providers.
+ * Supports multiple independent instances for different providers.
  */
-class SharedGeminiRateLimiter {
-  private static instance: SharedGeminiRateLimiter | null = null;
-
+class AIRateLimiter {
   private queue: QueuedRequest[] = [];
   private activeRequests: number = 0;
   private requestTimestamps: number[] = [];
   private config: RateLimiterConfig;
-  private tier: RateLimiterTier;
   private isInCooldown: boolean = false;
   private cooldownEndTime: number = 0;
   private processingQueue: boolean = false;
 
-  private constructor() {
-    this.tier = this.detectTier();
-    this.config = RATE_LIMITER_CONFIG[this.tier];
-    // Rate limiter ready with configured tier
-  }
-
-  static getInstance(): SharedGeminiRateLimiter {
-    if (!SharedGeminiRateLimiter.instance) {
-      SharedGeminiRateLimiter.instance = new SharedGeminiRateLimiter();
-    }
-    return SharedGeminiRateLimiter.instance;
-  }
-
-  private detectTier(): RateLimiterTier {
-    // Check for specific tier setting first
-    const tierEnv = process.env.GEMINI_TIER;
-    if (tierEnv === 'tier2') return 'tier2';
-    if (tierEnv === 'paid' || tierEnv === 'tier1') return 'paid';
-    if (tierEnv === 'free') return 'free';
-
-    // Fallback to legacy env var
-    const isPaidTier = process.env.GEMINI_PAID_TIER === 'true';
-    return isPaidTier ? 'paid' : 'free';
+  constructor(config: RateLimiterConfig) {
+    this.config = config;
   }
 
   /**
-   * Set the tier configuration manually
+   * Update the rate limiter configuration
    */
-  setTier(tier: RateLimiterTier): void {
-    this.tier = tier;
-    this.config = RATE_LIMITER_CONFIG[tier];
-    // Tier configuration updated
+  setConfig(config: RateLimiterConfig): void {
+    this.config = config;
   }
 
   /**
    * Get current configuration
    */
-  getConfig(): RateLimiterConfig & { tier: RateLimiterTier } {
-    return { ...this.config, tier: this.tier };
+  getConfig(): RateLimiterConfig {
+    return { ...this.config };
   }
 
   /**
@@ -88,13 +63,6 @@ class SharedGeminiRateLimiter {
   /**
    * Acquire a slot in the rate limiter queue.
    * Higher priority values are processed first.
-   *
-   * Priority levels:
-   * - 10: Image generation (highest)
-   * - 5: QA checks (blocks pipeline, must complete before regen)
-   * - 3: Prompt reimagination
-   * - 2: Prompt refinement
-   * - 1: Product analysis (lowest)
    */
   async acquire(priority: number = 0): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -278,7 +246,6 @@ class SharedGeminiRateLimiter {
             60000
           );
 
-          // Retrying after rate limit backoff
           await this.delay(backoffDelay);
           continue;
         }
@@ -307,13 +274,80 @@ class SharedGeminiRateLimiter {
   }
 }
 
-// Export singleton instance getter
-export const getRateLimiter = (): SharedGeminiRateLimiter => {
-  return SharedGeminiRateLimiter.getInstance();
+// ============================================
+// Tier Detection
+// ============================================
+
+const detectTier = (): RateLimiterTier => {
+  const tierEnv = process.env.GEMINI_TIER;
+  if (tierEnv === 'tier2') return 'tier2';
+  if (tierEnv === 'paid' || tierEnv === 'tier1') return 'paid';
+  if (tierEnv === 'free') return 'free';
+
+  const isPaidTier = process.env.GEMINI_PAID_TIER === 'true';
+  return isPaidTier ? 'paid' : 'free';
 };
 
+// ============================================
+// Provider-Specific Singleton Instances
+// ============================================
+
+let geminiImageLimiter: AIRateLimiter | null = null;
+let geminiTextLimiter: AIRateLimiter | null = null;
+let openaiLimiter: AIRateLimiter | null = null;
+
+/**
+ * Rate limiter for Gemini image generation (strict IPM limits)
+ */
+export const getGeminiImageRateLimiter = (): AIRateLimiter => {
+  if (!geminiImageLimiter) {
+    const tier = detectTier();
+    geminiImageLimiter = new AIRateLimiter(RATE_LIMITER_CONFIG[tier]);
+  }
+  return geminiImageLimiter;
+};
+
+/**
+ * Rate limiter for Gemini text/vision API calls (QA, analysis, prompts)
+ * Much more generous limits than image generation
+ */
+export const getGeminiTextRateLimiter = (): AIRateLimiter => {
+  if (!geminiTextLimiter) {
+    const tier = detectTier();
+    geminiTextLimiter = new AIRateLimiter(GEMINI_TEXT_RATE_LIMITER_CONFIG[tier]);
+  }
+  return geminiTextLimiter;
+};
+
+/**
+ * Rate limiter for OpenAI API calls (only used when gpt-image model is selected)
+ */
+export const getOpenAIRateLimiter = (): AIRateLimiter => {
+  if (!openaiLimiter) {
+    openaiLimiter = new AIRateLimiter(OPENAI_RATE_LIMITER_CONFIG);
+  }
+  return openaiLimiter;
+};
+
+/**
+ * Update tier for all rate limiters
+ */
+export const setAllTiers = (tier: RateLimiterTier): void => {
+  if (geminiImageLimiter) {
+    geminiImageLimiter.setConfig(RATE_LIMITER_CONFIG[tier]);
+  }
+  if (geminiTextLimiter) {
+    geminiTextLimiter.setConfig(GEMINI_TEXT_RATE_LIMITER_CONFIG[tier]);
+  }
+};
+
+/**
+ * Backward-compatible getter (defaults to Gemini image rate limiter)
+ */
+export const getRateLimiter = getGeminiImageRateLimiter;
+
 // Export class for testing
-export { SharedGeminiRateLimiter };
+export { AIRateLimiter };
 
 // Priority constants for convenience
 // QA checks run after generation and block the pipeline (regen waits on QA),
