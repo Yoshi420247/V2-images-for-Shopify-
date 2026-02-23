@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import {
   ShopifyCollection,
@@ -10,43 +9,19 @@ import {
 } from '../types';
 import { getRateLimiter, PRIORITY } from './sharedRateLimiter';
 import { MODELS, AI_STYLIST_PROMPT } from '../constants';
-
-// ============================================
-// Client Initialization
-// ============================================
-
-let geminiClient: GoogleGenAI | null = null;
-let openaiClient: OpenAI | null = null;
-
-const getGeminiClient = (): GoogleGenAI => {
-  if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY is not configured');
-    }
-    geminiClient = new GoogleGenAI({ apiKey });
-  }
-  return geminiClient;
-};
-
-const getOpenAIClient = (): OpenAI => {
-  if (!openaiClient) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
-    }
-    openaiClient = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
-  }
-  return openaiClient;
-};
+import {
+  getGeminiClient,
+  getOpenAIClient,
+  extractAndParseJson,
+  extractGeminiImage,
+  toDataUrl,
+  stripDataUrlPrefix,
+} from './apiClients';
 
 // ============================================
 // Stage 1: Collection Analysis & Planning
 // ============================================
 
-/**
- * Build market context instructions for prompts
- */
 const buildMarketContextPrompt = (marketContext?: MarketContext): string => {
   if (!marketContext) return '';
 
@@ -73,9 +48,6 @@ const buildMarketContextPrompt = (marketContext?: MarketContext): string => {
   return parts.join('\n');
 };
 
-/**
- * Analyze a collection and create a comprehensive plan for image generation
- */
 export const createCollectionPlan = async (
   collection: ShopifyCollection,
   sampleProducts: ShopifyProduct[],
@@ -88,18 +60,14 @@ export const createCollectionPlan = async (
     async () => {
       const openai = getOpenAIClient();
 
-      // Prepare product info
       const productInfo = sampleProducts
         .map((p) => `- ${p.title}: ${p.product_type || 'General'}`)
         .join('\n');
 
-      // Prepare image messages
       const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] =
         productImageBase64s.slice(0, 4).map((base64) => ({
           type: 'image_url' as const,
-          image_url: {
-            url: base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`,
-          },
+          image_url: { url: toDataUrl(base64) },
         }));
 
       const marketContextPrompt = buildMarketContextPrompt(marketContext);
@@ -159,16 +127,7 @@ Analyze this collection and the sample product images to create a comprehensive 
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from collection analysis');
-      }
-
-      try {
-        return JSON.parse(content) as CollectionPlan;
-      } catch {
-        throw new Error('Failed to parse collection plan response');
-      }
+      return extractAndParseJson<CollectionPlan>(response, 'collection plan');
     },
     PRIORITY.PRODUCT_ANALYSIS
   );
@@ -178,9 +137,6 @@ Analyze this collection and the sample product images to create a comprehensive 
 // Stage 2: Image Generation
 // ============================================
 
-/**
- * Generate a collection image based on the plan
- */
 export const generateCollectionImageWithPlan = async (
   plan: CollectionPlan,
   collection: ShopifyCollection,
@@ -193,7 +149,6 @@ export const generateCollectionImageWithPlan = async (
     async () => {
       const genai = getGeminiClient();
 
-      // Build market-specific instructions
       const marketInstructions = marketContext
         ? `\nMARKET TARGETING:
 This image is for the ${marketContext.industry} market.
@@ -203,7 +158,6 @@ ${marketContext.aestheticPreferences ? `Aesthetic: ${marketContext.aestheticPref
 Ensure the image resonates with this specific market and demographic.`
         : '';
 
-      // Build comprehensive prompt from plan
       const prompt = `${AI_STYLIST_PROMPT}
 
 Create a stunning marketing banner image for an e-commerce collection.
@@ -240,18 +194,14 @@ CRITICAL INSTRUCTIONS:
 4. Maintain brand consistency and commercial appeal
 5. Output a high-resolution landscape-oriented image`;
 
-      // Prepare image parts for reference
-      const imageParts = productImageBase64s.slice(0, 3).map((base64) => {
-        const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
-        return {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: cleanBase64,
-          },
-        };
-      });
+      const imageParts = productImageBase64s.slice(0, 3).map((base64) => ({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: stripDataUrlPrefix(base64),
+        },
+      }));
 
-      const model = genai.models.generateContent({
+      const response = await genai.models.generateContent({
         model: MODELS.IMAGE_GENERATION_PRO,
         contents: [
           {
@@ -267,21 +217,7 @@ CRITICAL INSTRUCTIONS:
         },
       });
 
-      const response = await model;
-
-      // Extract image from response
-      const candidate = response.candidates?.[0];
-      if (!candidate?.content?.parts) {
-        throw new Error('No image generated');
-      }
-
-      for (const part of candidate.content.parts) {
-        if ('inlineData' in part && part.inlineData?.data) {
-          return `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-        }
-      }
-
-      throw new Error('No image data in response');
+      return extractGeminiImage(response);
     },
     PRIORITY.IMAGE_GENERATION
   );
@@ -291,9 +227,6 @@ CRITICAL INSTRUCTIONS:
 // Stage 3: Quality Assurance
 // ============================================
 
-/**
- * Perform comprehensive QA on the generated collection image
- */
 export const performCollectionQA = async (
   generatedImageBase64: string,
   collection: ShopifyCollection,
@@ -306,23 +239,15 @@ export const performCollectionQA = async (
     async () => {
       const openai = getOpenAIClient();
 
-      // Prepare image messages
       const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
         {
           type: 'image_url' as const,
-          image_url: {
-            url: generatedImageBase64.startsWith('data:')
-              ? generatedImageBase64
-              : `data:image/png;base64,${generatedImageBase64}`,
-          },
+          image_url: { url: toDataUrl(generatedImageBase64, 'image/png') },
         },
-        // Include a reference product image for comparison
-        ...(productImageBase64s.slice(0, 1).map((base64) => ({
+        ...productImageBase64s.slice(0, 1).map((base64) => ({
           type: 'image_url' as const,
-          image_url: {
-            url: base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`,
-          },
-        }))),
+          image_url: { url: toDataUrl(base64) },
+        })),
       ];
 
       const response = await openai.chat.completions.create({
@@ -378,16 +303,7 @@ Perform comprehensive quality assessment.`,
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from collection QA');
-      }
-
-      try {
-        return JSON.parse(content) as CollectionQAResult;
-      } catch {
-        throw new Error('Failed to parse collection QA response');
-      }
+      return extractAndParseJson<CollectionQAResult>(response, 'collection QA');
     },
     PRIORITY.QA_CHECK
   );
@@ -397,9 +313,6 @@ Perform comprehensive quality assessment.`,
 // Stage 4: Retry with Enhanced Plan
 // ============================================
 
-/**
- * Create an enhanced plan addressing previous issues
- */
 export const createEnhancedPlan = async (
   originalPlan: CollectionPlan,
   qaResult: CollectionQAResult,
@@ -463,25 +376,12 @@ Create an enhanced plan that addresses these issues${userFeedback ? ' AND the us
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from plan enhancement');
-      }
-
-      try {
-        return JSON.parse(content) as CollectionPlan;
-      } catch {
-        throw new Error('Failed to parse enhanced plan response');
-      }
+      return extractAndParseJson<CollectionPlan>(response, 'enhanced plan');
     },
     PRIORITY.PROMPT_REFINEMENT
   );
 };
 
-/**
- * Regenerate collection image with user feedback
- * This allows users to explain WHY an image was wrong and get a corrected version
- */
 export const regenerateWithUserFeedback = async (
   collection: ShopifyCollection,
   originalPlan: CollectionPlan,
@@ -493,7 +393,6 @@ export const regenerateWithUserFeedback = async (
 ): Promise<{ base64: string; plan: CollectionPlan; qaResult: CollectionQAResult }> => {
   onProgress?.('processing_feedback', { feedback: userFeedback });
 
-  // Create enhanced plan incorporating user feedback
   const enhancedPlan = await createEnhancedPlan(
     originalPlan,
     previousQaResult,
@@ -503,7 +402,6 @@ export const regenerateWithUserFeedback = async (
   );
   onProgress?.('plan_enhanced', { plan: enhancedPlan });
 
-  // Generate new image with enhanced plan
   onProgress?.('generating', { withFeedback: true });
   const newImageBase64 = await generateCollectionImageWithPlan(
     enhancedPlan,
@@ -513,7 +411,6 @@ export const regenerateWithUserFeedback = async (
   );
   onProgress?.('generation_complete', {});
 
-  // Perform QA on new image
   onProgress?.('qa_checking', {});
   const newQaResult = await performCollectionQA(
     newImageBase64,
@@ -530,9 +427,6 @@ export const regenerateWithUserFeedback = async (
   };
 };
 
-/**
- * Retry collection image generation with enhanced plan
- */
 export const retryCollectionImage = async (
   collection: ShopifyCollection,
   originalPlan: CollectionPlan,
@@ -540,10 +434,8 @@ export const retryCollectionImage = async (
   productImageBase64s: string[],
   marketContext?: MarketContext
 ): Promise<{ base64: string; plan: CollectionPlan; qaResult: CollectionQAResult }> => {
-  // Create enhanced plan addressing issues
   const enhancedPlan = await createEnhancedPlan(originalPlan, qaResult, collection, marketContext);
 
-  // Generate new image with enhanced plan
   const newImageBase64 = await generateCollectionImageWithPlan(
     enhancedPlan,
     collection,
@@ -551,7 +443,6 @@ export const retryCollectionImage = async (
     marketContext
   );
 
-  // Perform QA on new image
   const newQaResult = await performCollectionQA(
     newImageBase64,
     collection,
@@ -570,9 +461,6 @@ export const retryCollectionImage = async (
 // Main Collection Pipeline
 // ============================================
 
-/**
- * Complete pipeline for generating a collection image
- */
 export const generateCollectionImage = async (
   collection: ShopifyCollection,
   sampleProducts: ShopifyProduct[],
@@ -586,7 +474,6 @@ export const generateCollectionImage = async (
   qaResult: CollectionQAResult;
   attempts: number;
 }> => {
-  // Stage 1: Create plan
   onProgress?.('planning', { collection: collection.title });
   const plan = await createCollectionPlan(collection, sampleProducts, productImageBase64s, marketContext);
   onProgress?.('plan_complete', { plan });
@@ -598,7 +485,6 @@ export const generateCollectionImage = async (
     attempts++;
     onProgress?.('generating', { attempt: attempts, maxRetries });
 
-    // Stage 2: Generate image
     const imageBase64 = await generateCollectionImageWithPlan(
       currentPlan,
       collection,
@@ -607,7 +493,6 @@ export const generateCollectionImage = async (
     );
     onProgress?.('generation_complete', { attempt: attempts });
 
-    // Stage 3: Quality check
     onProgress?.('qa_checking', { attempt: attempts });
     const qaResult = await performCollectionQA(
       imageBase64,
@@ -617,17 +502,10 @@ export const generateCollectionImage = async (
     );
     onProgress?.('qa_complete', { qaResult, attempt: attempts });
 
-    // Check if approved
     if (qaResult.isApproved) {
-      return {
-        base64: imageBase64,
-        plan: currentPlan,
-        qaResult,
-        attempts,
-      };
+      return { base64: imageBase64, plan: currentPlan, qaResult, attempts };
     }
 
-    // If not approved and we have retries left, enhance the plan
     if (attempts < maxRetries) {
       onProgress?.('retrying', {
         reason: qaResult.reasoning,
@@ -636,13 +514,7 @@ export const generateCollectionImage = async (
       });
       currentPlan = await createEnhancedPlan(currentPlan, qaResult, collection, marketContext);
     } else {
-      // Return the last attempt even if not approved
-      return {
-        base64: imageBase64,
-        plan: currentPlan,
-        qaResult,
-        attempts,
-      };
+      return { base64: imageBase64, plan: currentPlan, qaResult, attempts };
     }
   }
 
@@ -653,9 +525,6 @@ export const generateCollectionImage = async (
 // Utility Functions
 // ============================================
 
-/**
- * Quick analysis without full plan (for preview)
- */
 export const quickAnalyzeCollection = async (
   collection: ShopifyCollection,
   sampleProducts: ShopifyProduct[],
@@ -701,12 +570,7 @@ Products: ${productInfo}${marketContext ? `\nTarget Market: ${marketContext.indu
         ],
       });
 
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error('No response from quick analysis');
-      }
-
-      return JSON.parse(content) as CollectionAnalysis;
+      return extractAndParseJson<CollectionAnalysis>(response, 'quick analysis');
     },
     PRIORITY.PRODUCT_ANALYSIS
   );

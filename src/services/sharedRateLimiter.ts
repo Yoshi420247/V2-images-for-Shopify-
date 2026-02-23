@@ -29,7 +29,7 @@ class SharedGeminiRateLimiter {
   private constructor() {
     this.tier = this.detectTier();
     this.config = RATE_LIMITER_CONFIG[this.tier];
-    console.log(`[RateLimiter] Initialized with ${this.tier} tier configuration`);
+    // Rate limiter ready with configured tier
   }
 
   static getInstance(): SharedGeminiRateLimiter {
@@ -57,7 +57,7 @@ class SharedGeminiRateLimiter {
   setTier(tier: RateLimiterTier): void {
     this.tier = tier;
     this.config = RATE_LIMITER_CONFIG[tier];
-    console.log(`[RateLimiter] Switched to ${tier} tier configuration`);
+    // Tier configuration updated
   }
 
   /**
@@ -86,15 +86,15 @@ class SharedGeminiRateLimiter {
   }
 
   /**
-   * Acquire a slot in the rate limiter queue
-   * Higher priority values are processed first
+   * Acquire a slot in the rate limiter queue.
+   * Higher priority values are processed first.
    *
    * Priority levels:
    * - 10: Image generation (highest)
+   * - 5: QA checks (blocks pipeline, must complete before regen)
    * - 3: Prompt reimagination
    * - 2: Prompt refinement
-   * - 1: Product analysis
-   * - 0: QA checks (lowest)
+   * - 1: Product analysis (lowest)
    */
   async acquire(priority: number = 0): Promise<void> {
     return new Promise<void>((resolve, reject) => {
@@ -123,13 +123,11 @@ class SharedGeminiRateLimiter {
    * Handle rate limit error - enter cooldown mode
    */
   handleRateLimitError(): void {
-    console.log(`[RateLimiter] Rate limit hit, entering cooldown for ${this.config.rateLimitCooldown}ms`);
     this.isInCooldown = true;
     this.cooldownEndTime = Date.now() + this.config.rateLimitCooldown;
 
     setTimeout(() => {
       this.isInCooldown = false;
-      console.log('[RateLimiter] Cooldown ended, resuming requests');
       this.processQueue();
     }, this.config.rateLimitCooldown);
   }
@@ -280,7 +278,7 @@ class SharedGeminiRateLimiter {
             60000
           );
 
-          console.log(`[RateLimiter] Retry attempt ${attempt + 1} after ${backoffDelay}ms`);
+          // Retrying after rate limit backoff
           await this.delay(backoffDelay);
           continue;
         }
@@ -318,10 +316,12 @@ export const getRateLimiter = (): SharedGeminiRateLimiter => {
 export { SharedGeminiRateLimiter };
 
 // Priority constants for convenience
+// QA checks run after generation and block the pipeline (regen waits on QA),
+// so they need priority above prompt work but below active generation.
 export const PRIORITY = {
   IMAGE_GENERATION: 10,
+  QA_CHECK: 5,
   PROMPT_REIMAGINATION: 3,
   PROMPT_REFINEMENT: 2,
   PRODUCT_ANALYSIS: 1,
-  QA_CHECK: 0,
 } as const;
