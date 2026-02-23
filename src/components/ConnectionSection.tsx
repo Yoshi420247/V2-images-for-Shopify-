@@ -214,77 +214,61 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
                 )}
               </div>
             </div>
-            {supabaseStatus === 'error' && supabaseMessage.includes('not found') && supabaseMessage.includes('bucket') && (
+            {supabaseStatus === 'error' && (
               <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
-                <p className="font-medium mb-1">Create the storage bucket:</p>
-                <ol className="list-decimal list-inside space-y-1 text-gray-400">
-                  <li>Go to Supabase Dashboard &gt; Storage</li>
-                  <li>Click &quot;New bucket&quot;</li>
-                  <li>Name it <code className="text-blue-400">generated-images</code></li>
-                  <li>Toggle <strong>Public bucket</strong> ON</li>
-                  <li>Click &quot;Create bucket&quot;</li>
-                </ol>
-                <p className="mt-2 text-gray-400">Then add storage policies (see below).</p>
-              </div>
-            )}
-            {supabaseStatus === 'error' && (supabaseMessage.includes('polic') || supabaseMessage.includes('upload failed') || supabaseMessage.includes('security')) && (
-              <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
-                <p className="font-medium mb-1">Add storage policies:</p>
+                <p className="font-medium mb-1">Quick fix — run the full setup SQL:</p>
                 <p className="text-gray-400 mb-2">
-                  Your bucket exists but has no access policies. Run this SQL in{' '}
-                  <strong>Supabase Dashboard &gt; SQL Editor</strong>:
+                  Copy and paste this into <strong>Supabase Dashboard &gt; SQL Editor</strong>.
+                  It&apos;s safe to run multiple times.
                 </p>
-                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`-- First, drop any existing policies that may be misconfigured
+                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px] max-h-64 overflow-y-auto">{`-- ========== STORAGE BUCKET ==========
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('generated-images', 'generated-images', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- ========== STORAGE POLICIES (drop + recreate) ==========
+DROP POLICY IF EXISTS "Public read access for generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow uploads to generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow updates to generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow deletes from generated images" ON storage.objects;
 DROP POLICY IF EXISTS "Public read access" ON storage.objects;
 DROP POLICY IF EXISTS "Allow uploads" ON storage.objects;
-DROP POLICY IF EXISTS "Allow deletes" ON storage.objects;
 DROP POLICY IF EXISTS "Allow updates" ON storage.objects;
+DROP POLICY IF EXISTS "Allow deletes" ON storage.objects;
 
--- Allow public read access (SELECT)
-CREATE POLICY "Public read access"
-  ON storage.objects FOR SELECT TO anon
+CREATE POLICY "Public read access for generated images"
+  ON storage.objects FOR SELECT
   USING (bucket_id = 'generated-images');
-
--- Allow anonymous uploads (INSERT)
-CREATE POLICY "Allow uploads"
-  ON storage.objects FOR INSERT TO anon
+CREATE POLICY "Allow uploads to generated images"
+  ON storage.objects FOR INSERT
   WITH CHECK (bucket_id = 'generated-images');
-
--- Allow anonymous updates (needed for upsert)
-CREATE POLICY "Allow updates"
-  ON storage.objects FOR UPDATE TO anon
+CREATE POLICY "Allow updates to generated images"
+  ON storage.objects FOR UPDATE
+  USING (bucket_id = 'generated-images');
+CREATE POLICY "Allow deletes from generated images"
+  ON storage.objects FOR DELETE
   USING (bucket_id = 'generated-images');
 
--- Allow anonymous deletes (cleanup)
-CREATE POLICY "Allow deletes"
-  ON storage.objects FOR DELETE TO anon
-  USING (bucket_id = 'generated-images');`}</pre>
-                <p className="mt-2 text-gray-400">After running the SQL, click &quot;Test Connection&quot; again.</p>
-              </div>
-            )}
-            {supabaseStatus === 'error' && supabaseMessage.includes('table') && (
-              <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
-                <p className="font-medium mb-1">Create the jobs table:</p>
-                <p className="text-gray-400 mb-2">
-                  Run this SQL in <strong>Supabase Dashboard &gt; SQL Editor</strong>:
-                </p>
-                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`CREATE TABLE jobs (
-  id TEXT PRIMARY KEY,
+-- ========== JOBS TABLE ==========
+CREATE TABLE IF NOT EXISTS jobs (
+  id UUID PRIMARY KEY,
   name TEXT NOT NULL,
   status TEXT NOT NULL,
-  product_ids JSONB,
-  settings JSONB,
-  creation_date TIMESTAMPTZ,
-  product_states JSONB,
+  product_ids INTEGER[] NOT NULL,
+  settings JSONB NOT NULL,
+  creation_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  product_states JSONB NOT NULL DEFAULT '{}'::jsonb,
   error TEXT,
-  store_url TEXT
+  store_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Allow anonymous access (needed for browser client)
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all access"
-  ON jobs FOR ALL
-  USING (true) WITH CHECK (true);`}</pre>
+DROP POLICY IF EXISTS "Allow all operations on jobs" ON jobs;
+CREATE POLICY "Allow all operations on jobs" ON jobs
+  FOR ALL USING (true) WITH CHECK (true);`}</pre>
+                <p className="mt-2 text-gray-400">After running the SQL, click &quot;Test Connection&quot; again.</p>
               </div>
             )}
           </div>

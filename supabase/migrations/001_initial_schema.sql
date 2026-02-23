@@ -1,5 +1,6 @@
 -- Shopify AI Image Generator - Database Schema
 -- Run this in Supabase SQL Editor (https://supabase.com/dashboard/project/_/sql)
+-- Safe to re-run (idempotent)
 
 -- ============================================
 -- Jobs Table
@@ -39,12 +40,15 @@ CREATE TRIGGER update_jobs_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
--- Row Level Security (RLS)
+-- Row Level Security (RLS) for Jobs
 -- ============================================
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 
--- Allow all operations for anonymous users (since this is a client-side app)
--- In production, you'd want to add proper authentication
+-- Drop existing policies first (safe re-run)
+DROP POLICY IF EXISTS "Allow all operations on jobs" ON jobs;
+DROP POLICY IF EXISTS "Allow all access" ON jobs;
+
+-- Allow all operations for anonymous users (client-side app)
 CREATE POLICY "Allow all operations on jobs" ON jobs
     FOR ALL
     USING (true)
@@ -55,21 +59,37 @@ CREATE POLICY "Allow all operations on jobs" ON jobs
 -- ============================================
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('generated-images', 'generated-images', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = true;
 
--- Storage policies - allow public read and authenticated write
+-- ============================================
+-- Storage Policies (idempotent - drops then recreates)
+-- ============================================
+DROP POLICY IF EXISTS "Public read access for generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow uploads to generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow updates to generated images" ON storage.objects;
+DROP POLICY IF EXISTS "Allow deletes from generated images" ON storage.objects;
+-- Also drop any manually-created policies with different names
+DROP POLICY IF EXISTS "Public read access" ON storage.objects;
+DROP POLICY IF EXISTS "Allow uploads" ON storage.objects;
+DROP POLICY IF EXISTS "Allow updates" ON storage.objects;
+DROP POLICY IF EXISTS "Allow deletes" ON storage.objects;
+
+-- SELECT: allow anyone to read images (bucket is public anyway, but needed for list())
 CREATE POLICY "Public read access for generated images"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'generated-images');
 
+-- INSERT: allow anonymous uploads
 CREATE POLICY "Allow uploads to generated images"
 ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'generated-images');
 
+-- UPDATE: allow anonymous updates (needed for upsert operations)
 CREATE POLICY "Allow updates to generated images"
 ON storage.objects FOR UPDATE
 USING (bucket_id = 'generated-images');
 
+-- DELETE: allow anonymous deletes (cleanup)
 CREATE POLICY "Allow deletes from generated images"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'generated-images');
