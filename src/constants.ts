@@ -432,6 +432,7 @@ export const RETRY_CONFIG = {
 
 export const STORAGE_KEYS = {
   SHOPIFY_CREDENTIALS: 'shopify_credentials',
+  SUPABASE_CREDENTIALS: 'supabase_credentials',
   JOBS: 'generation_jobs',
   GENERATION_SETTINGS: 'generation_settings',
 };

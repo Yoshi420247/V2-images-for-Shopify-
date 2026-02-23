@@ -7,19 +7,46 @@ import { STORAGE_KEYS } from '../constants';
 // ============================================
 
 let supabaseClient: SupabaseClient | null = null;
+let configuredUrl: string | null = null;
 
-const getSupabaseClient = (): SupabaseClient | null => {
-  if (supabaseClient) return supabaseClient;
-
-  const url = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    // Supabase not configured - falling back to localStorage only
-    return null;
+/**
+ * Get Supabase credentials from localStorage (runtime) or env vars (build-time)
+ */
+const getSupabaseCredentials = (): { url: string; anonKey: string } | null => {
+  // Check localStorage first (runtime config takes priority)
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.SUPABASE_CREDENTIALS);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.url && parsed.anonKey) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Fall through to env vars
   }
 
-  supabaseClient = createClient(url, anonKey);
+  // Fall back to build-time env vars
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (url && anonKey) {
+    return { url, anonKey };
+  }
+
+  return null;
+};
+
+const getSupabaseClient = (): SupabaseClient | null => {
+  const creds = getSupabaseCredentials();
+  if (!creds) return null;
+
+  // Reinitialize if URL changed (user reconfigured)
+  if (supabaseClient && configuredUrl === creds.url) {
+    return supabaseClient;
+  }
+
+  supabaseClient = createClient(creds.url, creds.anonKey);
+  configuredUrl = creds.url;
   return supabaseClient;
 };
 
@@ -27,7 +54,93 @@ const getSupabaseClient = (): SupabaseClient | null => {
  * Check if Supabase is available
  */
 export const isSupabaseConfigured = (): boolean => {
-  return !!process.env.SUPABASE_URL && !!process.env.SUPABASE_ANON_KEY;
+  return !!getSupabaseCredentials();
+};
+
+/**
+ * Save Supabase credentials to localStorage for runtime configuration
+ */
+export const saveSupabaseConfig = (config: { url: string; anonKey: string }): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_CREDENTIALS, JSON.stringify(config));
+    // Reset client so it reinitializes with new credentials
+    supabaseClient = null;
+    configuredUrl = null;
+  } catch {
+    // Save failed - non-fatal
+  }
+};
+
+/**
+ * Load Supabase credentials from localStorage
+ */
+export const loadSupabaseConfig = (): { url: string; anonKey: string } | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.SUPABASE_CREDENTIALS);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    if (parsed.url && parsed.anonKey) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Clear Supabase credentials
+ */
+export const clearSupabaseConfig = (): void => {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.SUPABASE_CREDENTIALS);
+    supabaseClient = null;
+    configuredUrl = null;
+  } catch {
+    // Clear failed - non-fatal
+  }
+};
+
+/**
+ * Test Supabase connection and verify bucket/table exist.
+ * Returns a diagnostic result.
+ */
+export const testSupabaseConnection = async (): Promise<{
+  connected: boolean;
+  bucketOk: boolean;
+  tableOk: boolean;
+  error?: string;
+}> => {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { connected: false, bucketOk: false, tableOk: false, error: 'No Supabase credentials configured' };
+  }
+
+  try {
+    // Test basic connection by listing buckets
+    const { error: bucketError } = await client.storage.getBucket('generated-images');
+    const bucketOk = !bucketError;
+
+    // Test table access
+    const { error: tableError } = await client.from('jobs').select('id').limit(1);
+    const tableOk = !tableError;
+
+    return {
+      connected: true,
+      bucketOk,
+      tableOk,
+      error: !bucketOk
+        ? 'Storage bucket "generated-images" not found. Create it in Supabase Dashboard > Storage.'
+        : !tableOk
+        ? 'Table "jobs" not found. Run the setup SQL in Supabase Dashboard > SQL Editor.'
+        : undefined,
+    };
+  } catch (err) {
+    return {
+      connected: false,
+      bucketOk: false,
+      tableOk: false,
+      error: err instanceof Error ? err.message : 'Connection failed',
+    };
+  }
 };
 
 // ============================================

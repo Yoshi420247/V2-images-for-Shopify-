@@ -2,7 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { ShopifyCredentials } from '../types';
 import { CORS_PROXY_URL } from '../constants';
 import { testConnection } from '../services/shopifyService';
-import { loadCredentials, saveCredentials } from '../services/supabaseService';
+import {
+  loadCredentials,
+  saveCredentials,
+  loadSupabaseConfig,
+  saveSupabaseConfig,
+  testSupabaseConnection,
+} from '../services/supabaseService';
 import { checkApiConfiguration } from '../services/geminiService';
 
 interface ConnectionSectionProps {
@@ -17,6 +23,12 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Supabase config state
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  const [supabaseStatus, setSupabaseStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [supabaseMessage, setSupabaseMessage] = useState('');
+
   const apiConfig = checkApiConfiguration();
 
   // Load saved credentials on mount
@@ -29,7 +41,42 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
         setProxyUrl(saved.proxyUrl);
       }
     }
+
+    const savedSupabase = loadSupabaseConfig();
+    if (savedSupabase) {
+      setSupabaseUrl(savedSupabase.url);
+      setSupabaseAnonKey(savedSupabase.anonKey);
+      setSupabaseStatus('success');
+      setSupabaseMessage('Configured');
+    }
   }, []);
+
+  const handleTestSupabase = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      setSupabaseStatus('error');
+      setSupabaseMessage('Both URL and anon key are required');
+      return;
+    }
+
+    setSupabaseStatus('testing');
+    setSupabaseMessage('Testing connection...');
+
+    // Save first so the client can initialize
+    saveSupabaseConfig({ url: supabaseUrl.trim(), anonKey: supabaseAnonKey.trim() });
+
+    const result = await testSupabaseConnection();
+
+    if (result.connected && result.bucketOk && result.tableOk) {
+      setSupabaseStatus('success');
+      setSupabaseMessage('Connected! Bucket and table verified.');
+    } else if (result.connected) {
+      setSupabaseStatus('error');
+      setSupabaseMessage(result.error || 'Bucket or table missing');
+    } else {
+      setSupabaseStatus('error');
+      setSupabaseMessage(result.error || 'Connection failed');
+    }
+  };
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +112,11 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
 
       // Save credentials
       saveCredentials(credentials);
+
+      // Save Supabase config if provided
+      if (supabaseUrl.trim() && supabaseAnonKey.trim()) {
+        saveSupabaseConfig({ url: supabaseUrl.trim(), anonKey: supabaseAnonKey.trim() });
+      }
 
       // Notify parent
       onConnect(credentials, result.storeName || cleanStoreUrl);
@@ -119,6 +171,75 @@ const ConnectionSection: React.FC<ConnectionSectionProps> = ({ onConnect }) => {
               <p className="mt-2 text-xs text-yellow-400">
                 Configure API keys in environment variables to enable image generation
               </p>
+            )}
+          </div>
+
+          {/* Supabase Configuration */}
+          <div className="mb-6 p-4 bg-gray-700 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-300 mb-2">
+              Image Persistence (Supabase)
+            </h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Connect Supabase to persist images across sessions. Without this, images only survive refresh via local browser storage.
+            </p>
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={supabaseUrl}
+                onChange={(e) => { setSupabaseUrl(e.target.value); setSupabaseStatus('idle'); }}
+                placeholder="https://your-project.supabase.co"
+                className="w-full px-3 py-1.5 text-sm bg-gray-600 border border-gray-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="password"
+                value={supabaseAnonKey}
+                onChange={(e) => { setSupabaseAnonKey(e.target.value); setSupabaseStatus('idle'); }}
+                placeholder="Supabase anon key (eyJ...)"
+                className="w-full px-3 py-1.5 text-sm bg-gray-600 border border-gray-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestSupabase}
+                  disabled={supabaseStatus === 'testing'}
+                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50 text-white rounded-lg transition-colors"
+                >
+                  {supabaseStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                </button>
+                {supabaseStatus === 'success' && (
+                  <span className="text-xs text-green-400">{supabaseMessage}</span>
+                )}
+                {supabaseStatus === 'error' && (
+                  <span className="text-xs text-red-400">{supabaseMessage}</span>
+                )}
+              </div>
+            </div>
+            {supabaseStatus === 'error' && supabaseMessage.includes('bucket') && (
+              <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
+                <p className="font-medium mb-1">Setup Instructions:</p>
+                <ol className="list-decimal list-inside space-y-1 text-gray-400">
+                  <li>Go to Supabase Dashboard &gt; Storage</li>
+                  <li>Create bucket named <code className="text-blue-400">generated-images</code></li>
+                  <li>Set bucket to <strong>Public</strong></li>
+                  <li>Add a Storage policy: allow all operations for anon role</li>
+                </ol>
+              </div>
+            )}
+            {supabaseStatus === 'error' && supabaseMessage.includes('table') && (
+              <div className="mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300">
+                <p className="font-medium mb-1">Run this SQL in Supabase SQL Editor:</p>
+                <pre className="mt-1 p-2 bg-gray-900 rounded text-green-400 overflow-x-auto text-[10px]">{`CREATE TABLE jobs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  product_ids JSONB,
+  settings JSONB,
+  creation_date TIMESTAMPTZ,
+  product_states JSONB,
+  error TEXT,
+  store_url TEXT
+);`}</pre>
+              </div>
             )}
           </div>
 

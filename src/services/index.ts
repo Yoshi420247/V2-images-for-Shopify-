@@ -15,5 +15,9 @@ export {
   clearCredentials,
   saveGenerationSettings,
   loadGenerationSettings,
+  saveSupabaseConfig,
+  loadSupabaseConfig,
+  clearSupabaseConfig,
+  testSupabaseConnection,
 } from './supabaseService';
 export * from './collectionImageService';

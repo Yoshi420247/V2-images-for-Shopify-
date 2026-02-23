@@ -43,6 +43,192 @@ interface ImageWithContext {
   imageIndex: number;
 }
 
+// ============================================
+// ImageCard - extracted as a stable top-level component
+// so React doesn't remount it on every parent re-render
+// (which would lose the IndexedDB-loaded base64 state)
+// ============================================
+
+interface ImageCardProps {
+  item: ImageWithContext;
+  showProductName?: boolean;
+  jobId: string;
+  isAnalyzing: boolean;
+  onToggleSelection: (productId: number, imageId: string) => void;
+  onSmartRegenerate: (productId: number, imageIndex: number, image: GeneratedImage, product: ShopifyProduct, productState: ProductGenerationState) => void;
+  onManualRegenerate: (productId: number, imageIndex: number, image: GeneratedImage, product: ShopifyProduct, productState: ProductGenerationState) => void;
+  onViewImage: (item: ImageWithContext) => void;
+}
+
+const ImageCard: React.FC<ImageCardProps> = ({
+  item,
+  showProductName = true,
+  jobId,
+  isAnalyzing,
+  onToggleSelection,
+  onSmartRegenerate,
+  onManualRegenerate,
+  onViewImage,
+}) => {
+  const { image, product, productState, imageIndex } = item;
+  const [loadedBase64, setLoadedBase64] = useState<string | null>(null);
+  const imageUrl = image.imageUrl || image.base64 || loadedBase64;
+
+  // Load image from IndexedDB if neither base64 nor imageUrl available
+  useEffect(() => {
+    if (!image.base64 && !image.imageUrl && image.status !== 'generating') {
+      const key = imageKey(jobId, product.id, image.id);
+      loadImageFromStore(key).then((data) => {
+        if (data) setLoadedBase64(data);
+      });
+    }
+  }, [image.base64, image.imageUrl, image.id, image.status, product.id, jobId]);
+
+  const getStatusColor = () => {
+    switch (image.status) {
+      case 'generating':
+        return 'border-blue-500';
+      case 'success':
+      case 'uploaded':
+        return image.selectedForUpload ? 'border-green-500 ring-2 ring-green-500/50' : 'border-green-500/50';
+      case 'qa_failed':
+        return 'border-orange-500';
+      case 'error':
+        return 'border-red-500';
+      default:
+        return 'border-gray-700';
+    }
+  };
+
+  return (
+    <div
+      className={`relative bg-gray-800 rounded-lg overflow-hidden border-2 transition-all ${getStatusColor()} ${
+        image.selectedForUpload ? 'shadow-lg shadow-green-500/20' : ''
+      }`}
+    >
+      {/* Checkbox overlay */}
+      {image.status !== 'generating' && imageUrl && (
+        <div className="absolute top-2 left-2 z-10">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelection(product.id, image.id);
+            }}
+            className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-all ${
+              image.selectedForUpload
+                ? 'bg-green-500 border-green-500'
+                : 'bg-gray-900/80 border-gray-500 hover:border-green-400'
+            }`}
+          >
+            {image.selectedForUpload && (
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Status badge */}
+      <div className="absolute top-2 right-2 z-10">
+        {image.status === 'generating' && (
+          <span className="px-2 py-1 text-xs bg-blue-500/90 text-white rounded-full">
+            Generating...
+          </span>
+        )}
+        {image.status === 'uploaded' && (
+          <span className="px-2 py-1 text-xs bg-purple-500/90 text-white rounded-full">
+            Uploaded
+          </span>
+        )}
+        {image.status === 'qa_failed' && (
+          <span className="px-2 py-1 text-xs bg-orange-500/90 text-white rounded-full">
+            QA Failed
+          </span>
+        )}
+        {image.status === 'error' && (
+          <span className="px-2 py-1 text-xs bg-red-500/90 text-white rounded-full">
+            Error
+          </span>
+        )}
+      </div>
+
+      {/* Image */}
+      <div
+        className="aspect-square bg-gray-900 cursor-pointer"
+        onClick={() => onViewImage(item)}
+      >
+        {image.status === 'generating' || isAnalyzing ? (
+          <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2" />
+            <span className="text-xs">{isAnalyzing ? 'Analyzing...' : 'Generating...'}</span>
+          </div>
+        ) : imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={`Generated for ${product.title}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-500">
+            No image
+          </div>
+        )}
+      </div>
+
+      {/* Info section */}
+      <div className="p-2">
+        {showProductName && (
+          <p className="text-xs text-gray-300 truncate mb-1" title={product.title}>
+            {product.title}
+          </p>
+        )}
+
+        {/* QA info preview */}
+        {image.qaInfo && !image.qaInfo.isApproved && (
+          <p className="text-xs text-orange-400 truncate" title={image.qaInfo.reasoning}>
+            {image.qaInfo.reasoning}
+          </p>
+        )}
+
+        {/* Error message */}
+        {image.error && (
+          <p className="text-xs text-red-400 truncate" title={image.error}>
+            {image.error}
+          </p>
+        )}
+
+        {/* Action buttons */}
+        {['success', 'qa_failed', 'error'].includes(image.status) && (
+          <div className="flex gap-1 mt-2">
+            <button
+              onClick={() => onSmartRegenerate(product.id, imageIndex, image, product, productState)}
+              disabled={isAnalyzing}
+              className="flex-1 px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white rounded transition-colors"
+              title="AI analyzes what went wrong and regenerates"
+            >
+              Smart Regen
+            </button>
+            <button
+              onClick={() => onManualRegenerate(product.id, imageIndex, image, product, productState)}
+              className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+            >
+              Regenerate
+            </button>
+          </div>
+        )}
+
+        {/* Regeneration count */}
+        {image.regenerationCount > 0 && (
+          <p className="text-xs text-gray-500 mt-1">
+            Attempt {image.regenerationCount + 1}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const JobDetails: React.FC<JobDetailsProps> = ({
   job,
   products,
@@ -770,173 +956,11 @@ const JobDetails: React.FC<JobDetailsProps> = ({
     ['qa_failed', 'error'].includes(i.image.status)
   ).length;
 
-  // Image Card Component
-  const ImageCard: React.FC<{
-    item: ImageWithContext;
-    showProductName?: boolean;
-  }> = ({ item, showProductName = true }) => {
-    const { image, product, productState, imageIndex } = item;
-    const [loadedBase64, setLoadedBase64] = useState<string | null>(null);
-    const imageUrl = image.imageUrl || image.base64 || loadedBase64;
-    const isAnalyzing = smartAnalyzing.has(`${product.id}-${image.id}`);
-
-    // Load image from IndexedDB if neither base64 nor imageUrl available
-    useEffect(() => {
-      if (!image.base64 && !image.imageUrl && image.status !== 'generating') {
-        const key = imageKey(job.id, product.id, image.id);
-        loadImageFromStore(key).then((data) => {
-          if (data) setLoadedBase64(data);
-        });
-      }
-    }, [image.base64, image.imageUrl, image.id, image.status, product.id]);
-
-    const getStatusColor = () => {
-      switch (image.status) {
-        case 'generating':
-          return 'border-blue-500';
-        case 'success':
-        case 'uploaded':
-          return image.selectedForUpload ? 'border-green-500 ring-2 ring-green-500/50' : 'border-green-500/50';
-        case 'qa_failed':
-          return 'border-orange-500';
-        case 'error':
-          return 'border-red-500';
-        default:
-          return 'border-gray-700';
-      }
-    };
-
-    return (
-      <div
-        className={`relative bg-gray-800 rounded-lg overflow-hidden border-2 transition-all ${getStatusColor()} ${
-          image.selectedForUpload ? 'shadow-lg shadow-green-500/20' : ''
-        }`}
-      >
-        {/* Checkbox overlay */}
-        {image.status !== 'generating' && imageUrl && (
-          <div className="absolute top-2 left-2 z-10">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleImageSelection(product.id, image.id);
-              }}
-              className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-all ${
-                image.selectedForUpload
-                  ? 'bg-green-500 border-green-500'
-                  : 'bg-gray-900/80 border-gray-500 hover:border-green-400'
-              }`}
-            >
-              {image.selectedForUpload && (
-                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Status badge */}
-        <div className="absolute top-2 right-2 z-10">
-          {image.status === 'generating' && (
-            <span className="px-2 py-1 text-xs bg-blue-500/90 text-white rounded-full">
-              Generating...
-            </span>
-          )}
-          {image.status === 'uploaded' && (
-            <span className="px-2 py-1 text-xs bg-purple-500/90 text-white rounded-full">
-              Uploaded
-            </span>
-          )}
-          {image.status === 'qa_failed' && (
-            <span className="px-2 py-1 text-xs bg-orange-500/90 text-white rounded-full">
-              QA Failed
-            </span>
-          )}
-          {image.status === 'error' && (
-            <span className="px-2 py-1 text-xs bg-red-500/90 text-white rounded-full">
-              Error
-            </span>
-          )}
-        </div>
-
-        {/* Image */}
-        <div
-          className="aspect-square bg-gray-900 cursor-pointer"
-          onClick={() => {
-            setViewingImage(item);
-            setViewingImageIndex(filteredImagesForViewer.findIndex((i) => i.image.id === image.id));
-          }}
-        >
-          {image.status === 'generating' || isAnalyzing ? (
-            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2" />
-              <span className="text-xs">{isAnalyzing ? 'Analyzing...' : 'Generating...'}</span>
-            </div>
-          ) : imageUrl ? (
-            <img
-              src={imageUrl}
-              alt={`Generated for ${product.title}`}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-500">
-              No image
-            </div>
-          )}
-        </div>
-
-        {/* Info section */}
-        <div className="p-2">
-          {showProductName && (
-            <p className="text-xs text-gray-300 truncate mb-1" title={product.title}>
-              {product.title}
-            </p>
-          )}
-
-          {/* QA info preview */}
-          {image.qaInfo && !image.qaInfo.isApproved && (
-            <p className="text-xs text-orange-400 truncate" title={image.qaInfo.reasoning}>
-              {image.qaInfo.reasoning}
-            </p>
-          )}
-
-          {/* Error message */}
-          {image.error && (
-            <p className="text-xs text-red-400 truncate" title={image.error}>
-              {image.error}
-            </p>
-          )}
-
-          {/* Action buttons */}
-          {['success', 'qa_failed', 'error'].includes(image.status) && (
-            <div className="flex gap-1 mt-2">
-              <button
-                onClick={() => handleSmartRegenerate(product.id, imageIndex, image, product, productState)}
-                disabled={isAnalyzing}
-                className="flex-1 px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 text-white rounded transition-colors"
-                title="AI analyzes what went wrong and regenerates"
-              >
-                Smart Regen
-              </button>
-              <button
-                onClick={() => handleManualRegenerate(product.id, imageIndex, image, product, productState)}
-                className="flex-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-              >
-                Regenerate
-              </button>
-            </div>
-          )}
-
-          {/* Regeneration count */}
-          {image.regenerationCount > 0 && (
-            <p className="text-xs text-gray-500 mt-1">
-              Attempt {image.regenerationCount + 1}
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  };
+  // Helpers for ImageCard callbacks
+  const handleViewImage = useCallback((item: ImageWithContext) => {
+    setViewingImage(item);
+    setViewingImageIndex(filteredImagesForViewer.findIndex((i) => i.image.id === item.image.id));
+  }, [filteredImagesForViewer]);
 
   return (
     <div className="min-h-screen bg-gray-900">
@@ -1103,7 +1127,17 @@ const JobDetails: React.FC<JobDetailsProps> = ({
           // Grid View - all images in a responsive grid
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {getFilteredImages().map((item) => (
-              <ImageCard key={`${item.product.id}-${item.image.id}`} item={item} showProductName />
+              <ImageCard
+                key={`${item.product.id}-${item.image.id}`}
+                item={item}
+                showProductName
+                jobId={job.id}
+                isAnalyzing={smartAnalyzing.has(`${item.product.id}-${item.image.id}`)}
+                onToggleSelection={toggleImageSelection}
+                onSmartRegenerate={handleSmartRegenerate}
+                onManualRegenerate={handleManualRegenerate}
+                onViewImage={handleViewImage}
+              />
             ))}
           </div>
         ) : (
@@ -1178,6 +1212,12 @@ const JobDetails: React.FC<JobDetailsProps> = ({
                           key={image.id}
                           item={item}
                           showProductName={false}
+                          jobId={job.id}
+                          isAnalyzing={smartAnalyzing.has(`${product.id}-${image.id}`)}
+                          onToggleSelection={toggleImageSelection}
+                          onSmartRegenerate={handleSmartRegenerate}
+                          onManualRegenerate={handleManualRegenerate}
+                          onViewImage={handleViewImage}
                         />
                       );
                     })}
